@@ -118,7 +118,7 @@ mod tests {
         let input = "host=github.com\n\npath=org/repo.git\n";
         let fields = parse_stdin(input);
         assert_eq!(fields.len(), 1);
-        assert!(fields.get("path").is_none());
+        assert!(!fields.contains_key("path"));
     }
 
     #[test]
