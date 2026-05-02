@@ -6,7 +6,11 @@ mod ssh_wrap;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "git-router", version, about = "Route SSH keys and HTTPS credentials by org")]
+#[command(
+    name = "git-router",
+    version,
+    about = "Route SSH keys and HTTPS credentials by org"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
