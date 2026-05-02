@@ -50,11 +50,13 @@ pub fn load_config() -> io::Result<Config> {
 pub fn save_config(config: &Config) -> io::Result<()> {
     let path = config_path();
     let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "config path has no parent directory")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "config path has no parent directory",
+        )
     })?;
     fs::create_dir_all(parent)?;
-    let contents =
-        toml::to_string_pretty(config).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let contents = toml::to_string_pretty(config).map_err(io::Error::other)?;
     // Write to a temp file in the same directory, then rename for atomic replacement.
     let tmp_path = path.with_extension("toml.tmp");
     fs::write(&tmp_path, &contents)?;

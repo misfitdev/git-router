@@ -3,10 +3,7 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 pub fn parse_host(destination: &str) -> &str {
-    destination
-        .split('@')
-        .last()
-        .unwrap_or(destination)
+    destination.split('@').next_back().unwrap_or(destination)
 }
 
 pub fn parse_org_path(git_command_args: &[String]) -> Option<String> {

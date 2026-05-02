@@ -5,11 +5,17 @@ use std::process::Command;
 pub fn init() -> io::Result<()> {
     // --replace-all ensures re-running init is idempotent and doesn't stack duplicate entries.
     let status = Command::new("git")
-        .args(["config", "--global", "--replace-all", "core.sshCommand", "git-router ssh-wrap"])
+        .args([
+            "config",
+            "--global",
+            "--replace-all",
+            "core.sshCommand",
+            "git-router ssh-wrap",
+        ])
         .status()?;
     if !status.success() {
         eprintln!("Failed to set core.sshCommand");
-        return Err(io::Error::new(io::ErrorKind::Other, "git config failed"));
+        return Err(io::Error::other("git config failed"));
     }
 
     let status = Command::new("git")
@@ -23,7 +29,7 @@ pub fn init() -> io::Result<()> {
         .status()?;
     if !status.success() {
         eprintln!("Failed to set credential.helper");
-        return Err(io::Error::new(io::ErrorKind::Other, "git config failed"));
+        return Err(io::Error::other("git config failed"));
     }
 
     println!("Configured global gitconfig:");
@@ -107,7 +113,10 @@ pub fn doctor() -> io::Result<()> {
 
     let cfg = match config::load_config() {
         Ok(c) => {
-            println!("[pass] Config file parses successfully ({} routes)", c.routes.len());
+            println!(
+                "[pass] Config file parses successfully ({} routes)",
+                c.routes.len()
+            );
             Some(c)
         }
         Err(e) => {
@@ -139,7 +148,11 @@ pub fn doctor() -> io::Result<()> {
     }
 
     check_git_config("core.sshCommand", "git-router ssh-wrap", &mut all_ok);
-    check_git_config("credential.helper", "git-router credential-helper", &mut all_ok);
+    check_git_config(
+        "credential.helper",
+        "git-router credential-helper",
+        &mut all_ok,
+    );
     check_ssh_agent(&mut all_ok);
 
     if all_ok {
