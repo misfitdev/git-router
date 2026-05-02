@@ -75,9 +75,7 @@ fn main() {
         Commands::List => cli::list(),
         Commands::Remove { host, org } => cli::remove(&host, &org),
         Commands::Doctor => cli::doctor(),
-        Commands::SshWrap { args } => {
-            ssh_wrap::run(&args);
-        }
+        Commands::SshWrap { args } => ssh_wrap::run(&args),
         Commands::CredentialHelper { operation } => {
             credential::run(&operation);
             Ok(())

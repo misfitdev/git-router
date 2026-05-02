@@ -49,15 +49,18 @@ pub fn load_config() -> io::Result<Config> {
 
 pub fn save_config(config: &Config) -> io::Result<()> {
     let path = config_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "config path has no parent directory")
+    })?;
+    fs::create_dir_all(parent)?;
     let contents =
         toml::to_string_pretty(config).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    fs::write(&path, contents)
+    // Write to a temp file in the same directory, then rename for atomic replacement.
+    let tmp_path = path.with_extension("toml.tmp");
+    fs::write(&tmp_path, &contents)?;
+    fs::rename(&tmp_path, &path)
 }
 
-/// Expand leading `~` to the user's home directory.
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -72,23 +75,17 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// Resolve an ssh_key path from config: expand tilde, strip `.pub` suffix
-/// to get the private key path.
 pub fn resolve_key_path(raw: &str) -> PathBuf {
     let expanded = expand_tilde(raw);
-    let s = expanded.to_string_lossy();
-    if s.ends_with(".pub") {
-        PathBuf::from(&s[..s.len() - 4])
-    } else {
-        expanded
+    match expanded.to_str().and_then(|s| s.strip_suffix(".pub")) {
+        Some(private) => PathBuf::from(private),
+        None => expanded,
     }
 }
 
-/// Find the best matching route for a (host, org) pair.
-/// For nested paths like `planera.io/corp-it/auto-it.git`, tries matching
-/// progressively shorter prefixes: `planera.io/corp-it` first, then `planera.io`.
+/// Matches progressively shorter path prefixes so `planera.io/corp-it/repo.git`
+/// tries `planera.io/corp-it` before `planera.io`.
 pub fn find_route<'a>(config: &'a Config, host: &str, org_path: &str) -> Option<&'a Route> {
-    // Try longest prefix first, then progressively shorter
     let segments: Vec<&str> = org_path.split('/').collect();
     for end in (1..=segments.len()).rev() {
         let candidate = segments[..end].join("/");
@@ -156,7 +153,6 @@ mod tests {
     #[test]
     fn nested_gitlab_path_exact() {
         let cfg = test_config();
-        // Full nested path matches the more specific route
         let route = find_route(&cfg, "gitlab.com", "planera.io/corp-it/auto-it.git").unwrap();
         assert_eq!(route.org, "planera.io/corp-it");
     }
@@ -164,7 +160,6 @@ mod tests {
     #[test]
     fn nested_gitlab_path_fallback() {
         let cfg = test_config();
-        // Path that doesn't match the nested route falls back to org-level
         let route = find_route(&cfg, "gitlab.com", "planera.io/other-group/repo.git").unwrap();
         assert_eq!(route.org, "planera.io");
     }

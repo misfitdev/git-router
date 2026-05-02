@@ -2,7 +2,6 @@ use crate::config::{find_route, load_config, resolve_key_path};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-/// Parse the host from the SSH destination argument (e.g., `git@github.com` → `github.com`).
 pub fn parse_host(destination: &str) -> &str {
     destination
         .split('@')
@@ -10,14 +9,6 @@ pub fn parse_host(destination: &str) -> &str {
         .unwrap_or(destination)
 }
 
-/// Extract the org (first path segment) from a git command argument.
-/// Input examples:
-///   `git-upload-pack 'planeraio/repo.git'` → args like ["git-upload-pack", "'planeraio/repo.git'"]
-///   but git actually calls: ssh host git-upload-pack '/planeraio/repo.git'
-///
-/// We receive the full path as a single arg. Strip leading `/` and quotes,
-/// then return everything (org + remaining path segments without .git suffix)
-/// so the route matcher can try nested prefixes.
 pub fn parse_org_path(git_command_args: &[String]) -> Option<String> {
     // The path is typically the last argument to git-upload-pack / git-receive-pack
     let path_arg = git_command_args.last()?;
@@ -31,10 +22,7 @@ pub fn parse_org_path(git_command_args: &[String]) -> Option<String> {
     Some(cleaned.to_string())
 }
 
-/// Run the SSH wrapper: parse host/org, find route, exec ssh with the right key.
 pub fn run(args: &[String]) -> ! {
-    // args[0] = destination (e.g., git@github.com)
-    // args[1..] = git command (e.g., git-upload-pack '/org/repo.git')
     if args.is_empty() {
         exec_ssh(args);
     }
@@ -68,7 +56,6 @@ pub fn run(args: &[String]) -> ! {
     }
 }
 
-/// Exec ssh, replacing the current process. Never returns.
 fn exec_ssh(args: &[String]) -> ! {
     let err = Command::new("ssh").args(args).exec();
     eprintln!("git-router: failed to exec ssh: {err}");

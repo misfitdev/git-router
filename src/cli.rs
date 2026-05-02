@@ -3,20 +3,20 @@ use std::io;
 use std::process::Command;
 
 pub fn init() -> io::Result<()> {
-    // Set core.sshCommand
+    // --replace-all ensures re-running init is idempotent and doesn't stack duplicate entries.
     let status = Command::new("git")
-        .args(["config", "--global", "core.sshCommand", "git-router ssh-wrap"])
+        .args(["config", "--global", "--replace-all", "core.sshCommand", "git-router ssh-wrap"])
         .status()?;
     if !status.success() {
         eprintln!("Failed to set core.sshCommand");
         return Err(io::Error::new(io::ErrorKind::Other, "git config failed"));
     }
 
-    // Set credential.helper
     let status = Command::new("git")
         .args([
             "config",
             "--global",
+            "--replace-all",
             "credential.helper",
             "git-router credential-helper",
         ])
@@ -42,7 +42,6 @@ pub fn add(host: &str, org: &str, ssh_key: Option<&str>, token: Option<&str>) ->
 
     let mut cfg = config::load_config()?;
 
-    // Update existing route if one matches
     if let Some(existing) = cfg
         .routes
         .iter_mut()
@@ -98,7 +97,6 @@ pub fn remove(host: &str, org: &str) -> io::Result<()> {
 pub fn doctor() -> io::Result<()> {
     let mut all_ok = true;
 
-    // Check config file
     let cfg_path = config::config_path();
     if cfg_path.exists() {
         println!("[pass] Config file exists: {}", cfg_path.display());
@@ -107,7 +105,6 @@ pub fn doctor() -> io::Result<()> {
         all_ok = false;
     }
 
-    // Parse config
     let cfg = match config::load_config() {
         Ok(c) => {
             println!("[pass] Config file parses successfully ({} routes)", c.routes.len());
@@ -120,12 +117,10 @@ pub fn doctor() -> io::Result<()> {
         }
     };
 
-    // Check SSH key paths
     if let Some(ref cfg) = cfg {
         for route in &cfg.routes {
             if let Some(ref key_path) = route.ssh_key {
                 let expanded = config::expand_tilde(key_path);
-                // Check both the raw path and without .pub
                 let private = config::resolve_key_path(key_path);
                 if expanded.exists() || private.exists() {
                     println!(
@@ -143,21 +138,8 @@ pub fn doctor() -> io::Result<()> {
         }
     }
 
-    // Check core.sshCommand
-    check_git_config(
-        "core.sshCommand",
-        "git-router ssh-wrap",
-        &mut all_ok,
-    );
-
-    // Check credential.helper
-    check_git_config(
-        "credential.helper",
-        "git-router credential-helper",
-        &mut all_ok,
-    );
-
-    // Check SSH agent socket
+    check_git_config("core.sshCommand", "git-router ssh-wrap", &mut all_ok);
+    check_git_config("credential.helper", "git-router credential-helper", &mut all_ok);
     check_ssh_agent(&mut all_ok);
 
     if all_ok {
@@ -190,20 +172,20 @@ fn check_git_config(key: &str, expected_contains: &str, all_ok: &mut bool) {
     }
 }
 
-fn check_ssh_agent(all_ok: &mut bool) {
+fn check_ssh_agent(_all_ok: &mut bool) {
+    // SSH agent is not required: git-router uses IdentityFile + IdentitiesOnly=yes
+    // for key-file auth, which works without an agent. Missing agent is informational only.
     match std::env::var("SSH_AUTH_SOCK") {
         Ok(sock) => {
             let path = std::path::Path::new(&sock);
             if path.exists() {
                 println!("[pass] SSH agent socket: {sock}");
             } else {
-                println!("[FAIL] SSH_AUTH_SOCK set but socket does not exist: {sock}");
-                *all_ok = false;
+                println!("[warn] SSH_AUTH_SOCK set but socket does not exist: {sock}");
             }
         }
         Err(_) => {
-            println!("[FAIL] SSH_AUTH_SOCK is not set");
-            *all_ok = false;
+            println!("[info] SSH_AUTH_SOCK is not set (not required for key-file auth)");
         }
     }
 }

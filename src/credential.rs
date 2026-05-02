@@ -2,8 +2,6 @@ use crate::config::{find_route, load_config};
 use std::collections::HashMap;
 use std::io::{self, BufRead};
 
-/// Parse credential helper input from stdin.
-/// Format: key=value lines, terminated by a blank line or EOF.
 pub fn parse_stdin(input: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for line in input.lines() {
@@ -18,12 +16,6 @@ pub fn parse_stdin(input: &str) -> HashMap<String, String> {
     map
 }
 
-/// Extract the org from the path field (first segment before `/`).
-fn org_from_path(path: &str) -> &str {
-    path.split('/').next().unwrap_or(path)
-}
-
-/// Handle the `get` operation: look up credentials and print them.
 pub fn handle_get() {
     let mut input = String::new();
     let stdin = io::stdin();
@@ -50,14 +42,12 @@ pub fn handle_get() {
         None => return,
     };
 
-    let org = org_from_path(path);
-
     let config = match load_config() {
         Ok(c) => c,
         Err(_) => return,
     };
 
-    if let Some(route) = find_route(&config, host, org) {
+    if let Some(route) = find_route(&config, host, path) {
         if let Some(token) = &route.token {
             println!("username=x-access-token");
             println!("password={token}");
@@ -65,8 +55,6 @@ pub fn handle_get() {
     }
 }
 
-/// Entry point for credential helper mode.
-/// `store` and `erase` are no-ops.
 pub fn run(operation: &str) {
     match operation {
         "get" => handle_get(),
@@ -103,17 +91,29 @@ mod tests {
     }
 
     #[test]
-    fn org_from_path_simple() {
-        assert_eq!(org_from_path("planeraio/repo.git"), "planeraio");
-    }
-
-    #[test]
-    fn org_from_path_nested() {
-        assert_eq!(org_from_path("planera.io/corp-it/repo.git"), "planera.io");
-    }
-
-    #[test]
-    fn org_from_path_bare() {
-        assert_eq!(org_from_path("solo"), "solo");
+    fn nested_org_path_passed_to_find_route() {
+        use crate::config::{Config, Route};
+        let cfg = Config {
+            routes: vec![
+                Route {
+                    host: "gitlab.com".into(),
+                    org: "planera.io".into(),
+                    ssh_key: None,
+                    token: Some("tok-org".into()),
+                },
+                Route {
+                    host: "gitlab.com".into(),
+                    org: "planera.io/corp-it".into(),
+                    ssh_key: None,
+                    token: Some("tok-corp-it".into()),
+                },
+            ],
+        };
+        // Nested path should match the more specific route.
+        let route = crate::config::find_route(&cfg, "gitlab.com", "planera.io/corp-it/repo.git");
+        assert_eq!(route.and_then(|r| r.token.as_deref()), Some("tok-corp-it"));
+        // Shallow path should fall back to org-level route.
+        let route = crate::config::find_route(&cfg, "gitlab.com", "planera.io/other/repo.git");
+        assert_eq!(route.and_then(|r| r.token.as_deref()), Some("tok-org"));
     }
 }

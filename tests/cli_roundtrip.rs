@@ -5,9 +5,6 @@ fn git_router() -> Command {
 }
 
 fn with_config_dir<'a>(cmd: &'a mut Command, dir: &std::path::Path) -> &'a mut Command {
-    // XDG_CONFIG_HOME overrides dirs::config_dir() on Linux.
-    // On macOS dirs uses ~/Library/Application Support, but we can
-    // override via HOME to an isolated tmpdir.
     cmd.env("HOME", dir)
 }
 
@@ -15,11 +12,6 @@ fn with_config_dir<'a>(cmd: &'a mut Command, dir: &std::path::Path) -> &'a mut C
 fn add_list_remove_roundtrip() {
     let tmp = tempfile::tempdir().unwrap();
     let tmp_path = tmp.path();
-
-    // Create the config directory structure that dirs::config_dir() will resolve
-    // On macOS: HOME/Library/Application Support/git-router/
-    // On Linux: HOME/.config/git-router/
-    // We set HOME to tmp, so both resolve inside tmp.
 
     // Add a route
     let output = with_config_dir(&mut git_router(), tmp_path)
