@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Route SSH keys and HTTPS credentials by org/namespace in git remote URLs"
 license = "MIT"
+repository = "https://github.com/misfitdev/git-router"
+homepage = "https://github.com/misfitdev/git-router"
+keywords = ["git", "ssh", "credential", "routing"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.74"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
