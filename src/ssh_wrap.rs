@@ -113,4 +113,29 @@ mod tests {
         let args: Vec<String> = vec![];
         assert!(parse_org_path(&args).is_none());
     }
+
+    #[test]
+    fn parse_host_multiple_at_signs() {
+        assert_eq!(parse_host("user@name@github.com"), "github.com");
+    }
+
+    #[test]
+    fn parse_host_empty() {
+        assert_eq!(parse_host(""), "");
+    }
+
+    #[test]
+    fn parse_org_bare_slash() {
+        let args = vec!["git-upload-pack".to_string(), "'/'".to_string()];
+        assert!(parse_org_path(&args).is_none());
+    }
+
+    #[test]
+    fn parse_org_double_quoted() {
+        let args = vec![
+            "git-upload-pack".to_string(),
+            "\"/org/repo.git\"".to_string(),
+        ];
+        assert_eq!(parse_org_path(&args).unwrap(), "org/repo.git");
+    }
 }

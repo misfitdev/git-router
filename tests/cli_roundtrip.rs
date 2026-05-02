@@ -24,7 +24,11 @@ fn add_list_remove_roundtrip() {
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "add failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // List should show the route
     let output = with_config_dir(&mut git_router(), tmp_path)
@@ -33,8 +37,14 @@ fn add_list_remove_roundtrip() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("github.com/testorg"), "list output: {stdout}");
-    assert!(stdout.contains("ssh_key=~/.ssh/test.pub"), "list output: {stdout}");
+    assert!(
+        stdout.contains("github.com/testorg"),
+        "list output: {stdout}"
+    );
+    assert!(
+        stdout.contains("ssh_key=~/.ssh/test.pub"),
+        "list output: {stdout}"
+    );
 
     // Add a second route with a token
     let output = with_config_dir(&mut git_router(), tmp_path)
@@ -57,24 +67,46 @@ fn add_list_remove_roundtrip() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("github.com/testorg"), "list output: {stdout}");
-    assert!(stdout.contains("github.com/otherorg"), "list output: {stdout}");
-    assert!(stdout.contains("token=***"), "token should be masked: {stdout}");
+    assert!(
+        stdout.contains("github.com/testorg"),
+        "list output: {stdout}"
+    );
+    assert!(
+        stdout.contains("github.com/otherorg"),
+        "list output: {stdout}"
+    );
+    assert!(
+        stdout.contains("token=***"),
+        "token should be masked: {stdout}"
+    );
 
     // Update existing route
     let output = with_config_dir(&mut git_router(), tmp_path)
-        .args([
-            "add",
-            "github.com",
-            "testorg",
-            "--token",
-            "ghp_updated",
-        ])
+        .args(["add", "github.com", "testorg", "--token", "ghp_updated"])
         .output()
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Updated"), "should say updated: {stdout}");
+
+    // Verify partial update: adding --token to testorg preserved its ssh_key
+    let output = with_config_dir(&mut git_router(), tmp_path)
+        .args(["list"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let testorg_line = stdout
+        .lines()
+        .find(|l| l.contains("github.com/testorg"))
+        .expect("testorg should still exist");
+    assert!(
+        testorg_line.contains("ssh_key=~/.ssh/test.pub"),
+        "ssh_key should be preserved after token update: {testorg_line}"
+    );
+    assert!(
+        testorg_line.contains("token=***"),
+        "token should be present after update: {testorg_line}"
+    );
 
     // Remove the first route
     let output = with_config_dir(&mut git_router(), tmp_path)
@@ -91,8 +123,24 @@ fn add_list_remove_roundtrip() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(!stdout.contains("github.com/testorg"), "should be removed: {stdout}");
-    assert!(stdout.contains("github.com/otherorg"), "should remain: {stdout}");
+    assert!(
+        !stdout.contains("github.com/testorg"),
+        "should be removed: {stdout}"
+    );
+    assert!(
+        stdout.contains("github.com/otherorg"),
+        "should remain: {stdout}"
+    );
+
+    // Add with neither --ssh-key nor --token should fail
+    let output = with_config_dir(&mut git_router(), tmp_path)
+        .args(["add", "github.com", "failorg"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "should reject add with no key or token"
+    );
 
     // Remove non-existent route
     let output = with_config_dir(&mut git_router(), tmp_path)

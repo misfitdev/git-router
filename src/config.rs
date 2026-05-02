@@ -203,4 +203,89 @@ mod tests {
         let cfg: Config = toml::from_str("").unwrap();
         assert!(cfg.routes.is_empty());
     }
+
+    #[test]
+    fn invalid_toml_returns_error() {
+        let result: Result<Config, _> = toml::from_str("[[route]\nbroken");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn wrong_type_returns_error() {
+        let result: Result<Config, _> = toml::from_str("[[route]]\nhost = 42\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn find_route_single_org_multi_segment_path() {
+        let cfg = test_config();
+        let route = find_route(&cfg, "github.com", "planeraio/some-repo.git").unwrap();
+        assert_eq!(route.org, "planeraio");
+    }
+
+    #[test]
+    fn display_ssh_key_only() {
+        let route = Route {
+            host: "github.com".into(),
+            org: "myorg".into(),
+            ssh_key: Some("~/.ssh/key".into()),
+            token: None,
+        };
+        let s = format!("{route}");
+        assert_eq!(s, "github.com/myorg  ssh_key=~/.ssh/key");
+    }
+
+    #[test]
+    fn display_token_masked() {
+        let route = Route {
+            host: "github.com".into(),
+            org: "myorg".into(),
+            ssh_key: None,
+            token: Some("ghp_secret".into()),
+        };
+        let s = format!("{route}");
+        assert_eq!(s, "github.com/myorg  token=***");
+        assert!(!s.contains("ghp_secret"));
+    }
+
+    #[test]
+    fn display_both() {
+        let route = Route {
+            host: "github.com".into(),
+            org: "myorg".into(),
+            ssh_key: Some("~/.ssh/key".into()),
+            token: Some("ghp_secret".into()),
+        };
+        let s = format!("{route}");
+        assert_eq!(s, "github.com/myorg  ssh_key=~/.ssh/key  token=***");
+    }
+
+    #[test]
+    fn display_neither() {
+        let route = Route {
+            host: "github.com".into(),
+            org: "myorg".into(),
+            ssh_key: None,
+            token: None,
+        };
+        assert_eq!(format!("{route}"), "github.com/myorg");
+    }
+
+    #[test]
+    fn expand_tilde_bare() {
+        let result = expand_tilde("~");
+        assert!(!result.to_string_lossy().starts_with('~'));
+    }
+
+    #[test]
+    fn expand_tilde_no_tilde() {
+        let result = expand_tilde("/absolute/path");
+        assert_eq!(result, PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn resolve_key_pub_in_middle_unchanged() {
+        let result = resolve_key_path("/keys/my.pub.bak");
+        assert_eq!(result, PathBuf::from("/keys/my.pub.bak"));
+    }
 }

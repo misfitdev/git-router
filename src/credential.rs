@@ -91,6 +91,37 @@ mod tests {
     }
 
     #[test]
+    fn parse_stdin_skips_lines_without_equals() {
+        let input = "protocol=https\ngarbage\nhost=github.com\n";
+        let fields = parse_stdin(input);
+        assert_eq!(fields.get("protocol").unwrap(), "https");
+        assert_eq!(fields.get("host").unwrap(), "github.com");
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn parse_stdin_empty_value() {
+        let input = "protocol=https\nhost=\n";
+        let fields = parse_stdin(input);
+        assert_eq!(fields.get("host").unwrap(), "");
+    }
+
+    #[test]
+    fn parse_stdin_duplicate_key_last_wins() {
+        let input = "host=first.com\nhost=second.com\n";
+        let fields = parse_stdin(input);
+        assert_eq!(fields.get("host").unwrap(), "second.com");
+    }
+
+    #[test]
+    fn parse_stdin_stops_at_blank_line() {
+        let input = "host=github.com\n\npath=org/repo.git\n";
+        let fields = parse_stdin(input);
+        assert_eq!(fields.len(), 1);
+        assert!(fields.get("path").is_none());
+    }
+
+    #[test]
     fn nested_org_path_passed_to_find_route() {
         use crate::config::{Config, Route};
         let cfg = Config {
