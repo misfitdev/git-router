@@ -2,7 +2,7 @@
 [![Release](https://github.com/misfitdev/git-router/actions/workflows/release.yml/badge.svg)](https://github.com/misfitdev/git-router/actions/workflows/release.yml)
 [![Crates.io](https://img.shields.io/crates/v/git-router)](https://crates.io/crates/git-router)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![SLSA 3](https://slsa.dev/images/gh-badge-level3.svg)](https://slsa.dev)
+[![SLSA 1](https://slsa.dev/images/gh-badge-level1.svg)](https://slsa.dev)
 
 # git-router
 
