@@ -1,14 +1,18 @@
-[![CI](https://github.com/misfitdev/git-router/actions/workflows/ci.yml/badge.svg)](https://github.com/misfitdev/git-router/actions/workflows/ci.yml)
-[![Release](https://github.com/misfitdev/git-router/actions/workflows/release.yml/badge.svg)](https://github.com/misfitdev/git-router/actions/workflows/release.yml)
-[![Crates.io](https://img.shields.io/crates/v/git-router)](https://crates.io/crates/git-router)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![SLSA 1](https://slsa.dev/images/gh-badge-level1.svg)](https://github.com/misfitdev/git-router/attestations)
+<h1 align="center">git-router</h1>
 
-# git-router
+<p align="center">
+<a href="https://github.com/misfitdev/git-router/actions/workflows/ci.yml"><img src="https://github.com/misfitdev/git-router/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://github.com/misfitdev/git-router/actions/workflows/release.yml"><img src="https://github.com/misfitdev/git-router/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+<a href="https://crates.io/crates/git-router"><img src="https://img.shields.io/crates/v/git-router" alt="Crates.io"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+<a href="https://github.com/misfitdev/git-router/attestations"><img src="https://slsa.dev/images/gh-badge-level1.svg" alt="SLSA 1"></a>
+</p>
 
+<p align="center">
 Route SSH keys and HTTPS credentials by matching the org/namespace in
-git remote URLs. Replaces SSH host aliases and `url.<base>.insteadOf`
+git remote URLs. Replaces SSH host aliases and <code>url.&lt;base&gt;.insteadOf</code>
 rules.
+</p>
 
 <p align="center">
 <a href="#install">Install</a> &middot;
@@ -18,6 +22,8 @@ rules.
 <a href="#commands">Commands</a> &middot;
 <a href="#security">Security</a>
 </p>
+
+---
 
 ## Install
 
