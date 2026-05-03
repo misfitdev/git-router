@@ -10,13 +10,14 @@ Route SSH keys and HTTPS credentials by matching the org/namespace in
 git remote URLs. Replaces SSH host aliases and `url.<base>.insteadOf`
 rules.
 
-- [Install](#install)
-- [Quick start](#quick-start)
-- [How it works](#how-it-works)
-- [Config](#config)
-- [Commands](#commands)
-- [Design constraints](#design-constraints)
-- [Security](#security)
+<p align="center">
+<a href="#install">Install</a> &middot;
+<a href="#quick-start">Quick start</a> &middot;
+<a href="#how-it-works">How it works</a> &middot;
+<a href="#config">Config</a> &middot;
+<a href="#commands">Commands</a> &middot;
+<a href="#security">Security</a>
+</p>
 
 ## Install
 
