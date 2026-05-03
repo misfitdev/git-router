@@ -2,7 +2,7 @@
 [![Release](https://github.com/misfitdev/git-router/actions/workflows/release.yml/badge.svg)](https://github.com/misfitdev/git-router/actions/workflows/release.yml)
 [![Crates.io](https://img.shields.io/crates/v/git-router)](https://crates.io/crates/git-router)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![SLSA 1](https://slsa.dev/images/gh-badge-level1.svg)](https://slsa.dev)
+[![SLSA 1](https://slsa.dev/images/gh-badge-level1.svg)](https://github.com/misfitdev/git-router/attestations)
 
 # git-router
 
@@ -18,7 +18,7 @@ cargo install git-router
 
 Or download a binary from [Releases](https://github.com/misfitdev/git-router/releases).
 Every release includes SHA256 checksums and
-[SLSA build provenance](https://slsa.dev) attestations, verifiable with:
+[SLSA build provenance](https://github.com/misfitdev/git-router/attestations) attestations, verifiable with:
 
 ```sh
 gh attestation verify git-router-*.tar.gz --owner misfitdev
