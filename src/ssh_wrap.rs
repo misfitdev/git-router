@@ -19,13 +19,41 @@ pub fn parse_org_path(git_command_args: &[String]) -> Option<String> {
     Some(cleaned.to_string())
 }
 
+/// SSH options that consume the next argument as a value.
+const SSH_OPTS_WITH_VALUE: &[&str] = &[
+    "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q",
+    "-R", "-S", "-W", "-w",
+];
+
+/// Find the destination argument by skipping SSH flags.
+/// Returns (destination_index, git_command_start_index).
+pub fn find_destination(args: &[String]) -> Option<(usize, usize)> {
+    let mut i = 0;
+    while i < args.len() {
+        if SSH_OPTS_WITH_VALUE.contains(&args[i].as_str()) {
+            i += 2; // skip flag + value
+        } else if args[i].starts_with('-') {
+            i += 1; // standalone flag
+        } else {
+            // first non-flag arg is the destination
+            return Some((i, i + 1));
+        }
+    }
+    None
+}
+
 pub fn run(args: &[String]) -> ! {
     if args.is_empty() {
         exec_ssh(args);
     }
 
-    let host = parse_host(&args[0]);
-    let git_cmd_args = &args[1..];
+    let (dest_idx, git_cmd_start) = match find_destination(args) {
+        Some(v) => v,
+        None => exec_ssh(args),
+    };
+
+    let host = parse_host(&args[dest_idx]);
+    let git_cmd_args = &args[git_cmd_start..];
 
     let org_path = match parse_org_path(git_cmd_args) {
         Some(p) => p,
@@ -128,6 +156,62 @@ mod tests {
     fn parse_org_bare_slash() {
         let args = vec!["git-upload-pack".to_string(), "'/'".to_string()];
         assert!(parse_org_path(&args).is_none());
+    }
+
+    #[test]
+    fn find_dest_simple() {
+        let args: Vec<String> = vec!["git@github.com", "git-upload-pack", "'org/repo.git'"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let (dest, git_start) = find_destination(&args).unwrap();
+        assert_eq!(dest, 0);
+        assert_eq!(git_start, 1);
+    }
+
+    #[test]
+    fn find_dest_with_ssh_flags() {
+        let args: Vec<String> = vec![
+            "-o",
+            "SendEnv=GIT_PROTOCOL",
+            "git@github.com",
+            "git-upload-pack",
+            "'misfitdev/repo.git'",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let (dest, git_start) = find_destination(&args).unwrap();
+        assert_eq!(args[dest], "git@github.com");
+        assert_eq!(git_start, 3);
+    }
+
+    #[test]
+    fn find_dest_with_multiple_flags() {
+        let args: Vec<String> = vec![
+            "-v",
+            "-o",
+            "SendEnv=GIT_PROTOCOL",
+            "-p",
+            "2222",
+            "git@github.com",
+            "git-upload-pack",
+            "'org/repo.git'",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let (dest, _) = find_destination(&args).unwrap();
+        assert_eq!(args[dest], "git@github.com");
+    }
+
+    #[test]
+    fn find_dest_no_destination() {
+        let args: Vec<String> = vec!["-v", "-o", "Foo=bar"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert!(find_destination(&args).is_none());
     }
 
     #[test]
