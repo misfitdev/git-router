@@ -10,19 +10,49 @@ Route SSH keys and HTTPS credentials by matching the org/namespace in
 git remote URLs. Replaces SSH host aliases and `url.<base>.insteadOf`
 rules.
 
+- [Install](#install)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Config](#config)
+- [Commands](#commands)
+- [Design constraints](#design-constraints)
+- [Security](#security)
+
 ## Install
 
-```sh
-cargo install git-router
-```
+<details>
+<summary>Linux</summary>
 
-Or download a binary from [Releases](https://github.com/misfitdev/git-router/releases).
+> | Repository      | Instructions                            |
+> | --------------- | --------------------------------------- |
+> | **crates.io**   | `cargo install git-router`              |
+> | Homebrew        | `brew install misfitdev/tap/git-router` |
+>
+> Or download a prebuilt binary from [GitHub Releases].
+
+</details>
+
+<details>
+<summary>macOS</summary>
+
+> | Repository      | Instructions                            |
+> | --------------- | --------------------------------------- |
+> | **Homebrew**    | `brew install misfitdev/tap/git-router` |
+> | crates.io       | `cargo install git-router`              |
+>
+> Or download a prebuilt binary from [GitHub Releases].
+
+</details>
+
 Every release includes SHA256 checksums and
-[SLSA build provenance](https://github.com/misfitdev/git-router/attestations) attestations, verifiable with:
+[SLSA build provenance][attestations] attestations, verifiable with:
 
 ```sh
 gh attestation verify git-router-*.tar.gz --owner misfitdev
 ```
+
+[GitHub Releases]: https://github.com/misfitdev/git-router/releases
+[attestations]: https://github.com/misfitdev/git-router/attestations
 
 ## Quick start
 
