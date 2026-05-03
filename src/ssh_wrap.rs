@@ -7,9 +7,16 @@ pub fn parse_host(destination: &str) -> &str {
 }
 
 pub fn parse_org_path(git_command_args: &[String]) -> Option<String> {
-    // The path is typically the last argument to git-upload-pack / git-receive-pack
     let path_arg = git_command_args.last()?;
-    let cleaned = path_arg
+
+    // Git may pass the command and path as a single arg:
+    //   "git-upload-pack 'org/repo.git'"
+    // or as separate args:
+    //   "git-upload-pack" "'org/repo.git'"
+    // Extract the last whitespace-separated token to get the path.
+    let path_part = path_arg.split_whitespace().next_back().unwrap_or(path_arg);
+
+    let cleaned = path_part
         .trim_matches('\'')
         .trim_matches('"')
         .trim_start_matches('/');
@@ -65,9 +72,17 @@ pub fn run(args: &[String]) -> ! {
         Err(_) => exec_ssh(args),
     };
 
+    let debug = std::env::var("GIT_ROUTER_DEBUG").is_ok();
+
     match find_route(&config, host, &org_path) {
         Some(route) if route.ssh_key.is_some() => {
             let key_path = resolve_key_path(route.ssh_key.as_ref().unwrap());
+            if debug {
+                eprintln!(
+                    "git-router: matched {host}/{org_path} -> {}",
+                    key_path.display()
+                );
+            }
             let mut ssh_args = vec![
                 "-o".to_string(),
                 format!("IdentityFile={}", key_path.display()),
@@ -77,7 +92,12 @@ pub fn run(args: &[String]) -> ! {
             ssh_args.extend_from_slice(args);
             exec_ssh(&ssh_args);
         }
-        _ => exec_ssh(args),
+        _ => {
+            if debug {
+                eprintln!("git-router: no match for {host}/{org_path}, passthrough");
+            }
+            exec_ssh(args);
+        }
     }
 }
 
@@ -212,6 +232,12 @@ mod tests {
             .map(String::from)
             .collect();
         assert!(find_destination(&args).is_none());
+    }
+
+    #[test]
+    fn parse_org_single_arg_with_command() {
+        let args = vec!["git-upload-pack 'misfitdev/git-router.git'".to_string()];
+        assert_eq!(parse_org_path(&args).unwrap(), "misfitdev/git-router.git");
     }
 
     #[test]

@@ -77,12 +77,19 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Resolve an SSH key path. If the user gave a `.pub` path, prefer the
+/// private key file (same path without `.pub`). If the private key doesn't
+/// exist -- e.g. when using an SSH agent like 1Password -- keep the `.pub`
+/// path so SSH can identify the key and request it from the agent.
 pub fn resolve_key_path(raw: &str) -> PathBuf {
     let expanded = expand_tilde(raw);
-    match expanded.to_str().and_then(|s| s.strip_suffix(".pub")) {
-        Some(private) => PathBuf::from(private),
-        None => expanded,
+    if let Some(private) = expanded.to_str().and_then(|s| s.strip_suffix(".pub")) {
+        let private_path = PathBuf::from(private);
+        if private_path.exists() {
+            return private_path;
+        }
     }
+    expanded
 }
 
 /// Matches progressively shorter path prefixes so `planera.io/corp-it/repo.git`
@@ -174,10 +181,23 @@ mod tests {
     }
 
     #[test]
-    fn resolve_key_strips_pub() {
-        let result = resolve_key_path("~/.ssh/id_rsa.pub");
-        let s = result.to_string_lossy();
-        assert!(s.ends_with(".ssh/id_rsa"), "got: {s}");
+    fn resolve_key_strips_pub_when_private_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let private = dir.path().join("mykey");
+        let public = dir.path().join("mykey.pub");
+        std::fs::write(&private, "").unwrap();
+        std::fs::write(&public, "").unwrap();
+        let result = resolve_key_path(public.to_str().unwrap());
+        assert_eq!(result, private);
+    }
+
+    #[test]
+    fn resolve_key_keeps_pub_when_no_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let public = dir.path().join("mykey.pub");
+        std::fs::write(&public, "").unwrap();
+        let result = resolve_key_path(public.to_str().unwrap());
+        assert_eq!(result, public);
     }
 
     #[test]
