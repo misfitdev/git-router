@@ -17,9 +17,9 @@ rules.
 <p align="center">
 <a href="#install">Install</a> &middot;
 <a href="#quick-start">Quick start</a> &middot;
-<a href="#how-it-works">How it works</a> &middot;
-<a href="#config">Config</a> &middot;
 <a href="#commands">Commands</a> &middot;
+<a href="#config">Config</a> &middot;
+<a href="#how-it-works">How it works</a> &middot;
 <a href="#security">Security</a>
 </p>
 
@@ -79,22 +79,15 @@ git router doctor
 Now `git clone`, `git fetch`, and `git push` automatically use the right
 SSH key and HTTPS token based on the org in the remote URL.
 
-## How it works
+## Commands
 
-`git-router` is a single binary with three modes, detected by how git
-invokes it:
-
-**SSH wrapper** (`core.sshCommand = git-router ssh-wrap`) -- git calls
-this for SSH remotes. It parses the host and org from the SSH arguments,
-looks up the matching route, and execs `ssh` with the correct
-`IdentityFile`.
-
-**Credential helper** (`credential.helper = git-router credential-helper`)
--- git calls this for HTTPS remotes. It reads the host and path from
-stdin, matches a route, and returns the token.
-
-**CLI** (`git router <subcommand>`) -- manages routes and verifies
-configuration.
+| Command | Description |
+|---------|-------------|
+| `git router init` | Write `core.sshCommand` and `credential.helper` to global gitconfig |
+| `git router add <host> <org> [--ssh-key PATH] [--token TOKEN]` | Add or update a route |
+| `git router list` | Print the route table |
+| `git router remove <host> <org>` | Remove a route |
+| `git router doctor` | Verify config, keys, gitconfig wiring, and SSH agent |
 
 ## Config
 
@@ -122,17 +115,24 @@ For GitLab nested groups, routes match progressively shorter path
 prefixes. A route for `my-group/infra` matches before a broader
 `my-group` route.
 
-## Commands
+## How it works
 
-| Command | Description |
-|---------|-------------|
-| `git router init` | Write `core.sshCommand` and `credential.helper` to global gitconfig |
-| `git router add <host> <org> [--ssh-key PATH] [--token TOKEN]` | Add or update a route |
-| `git router list` | Print the route table |
-| `git router remove <host> <org>` | Remove a route |
-| `git router doctor` | Verify config, keys, gitconfig wiring, and SSH agent |
+`git-router` is a single binary with three modes, detected by how git
+invokes it:
 
-## Design constraints
+**SSH wrapper** (`core.sshCommand = git-router ssh-wrap`) -- git calls
+this for SSH remotes. It parses the host and org from the SSH arguments,
+looks up the matching route, and execs `ssh` with the correct
+`IdentityFile`.
+
+**Credential helper** (`credential.helper = git-router credential-helper`)
+-- git calls this for HTTPS remotes. It reads the host and path from
+stdin, matches a route, and returns the token.
+
+**CLI** (`git router <subcommand>`) -- manages routes and verifies
+configuration.
+
+### Design constraints
 
 - Never modifies `~/.ssh/config`
 - Passes through on no match -- never blocks a git operation
