@@ -32,17 +32,45 @@ pub fn init() -> io::Result<()> {
         return Err(io::Error::other("git config failed"));
     }
 
+    // Point global gitconfig at the identity includes file.
+    let identities_path = config::identities_gitconfig_path();
+    let status = Command::new("git")
+        .args([
+            "config",
+            "--global",
+            "--replace-all",
+            "include.path",
+            &identities_path.to_string_lossy(),
+        ])
+        .status()?;
+    if !status.success() {
+        eprintln!("Failed to set include.path for identities");
+        return Err(io::Error::other("git config failed"));
+    }
+
+    // Generate identity gitconfig files from current routes.
+    let cfg = config::load_config()?;
+    config::write_identity_configs(&cfg)?;
+
     println!("Configured global gitconfig:");
     println!("  core.sshCommand = git-router ssh-wrap");
     println!("  credential.helper = git-router credential-helper");
+    println!("  include.path = {}", identities_path.display());
     Ok(())
 }
 
-pub fn add(host: &str, org: &str, ssh_key: Option<&str>, token: Option<&str>) -> io::Result<()> {
-    if ssh_key.is_none() && token.is_none() {
+pub fn add(
+    host: &str,
+    org: &str,
+    ssh_key: Option<&str>,
+    token: Option<&str>,
+    user_name: Option<&str>,
+    user_email: Option<&str>,
+) -> io::Result<()> {
+    if ssh_key.is_none() && token.is_none() && user_name.is_none() && user_email.is_none() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "at least one of --ssh-key or --token is required",
+            "at least one of --ssh-key, --token, --user-name, or --user-email is required",
         ));
     }
 
@@ -59,7 +87,14 @@ pub fn add(host: &str, org: &str, ssh_key: Option<&str>, token: Option<&str>) ->
         if let Some(tok) = token {
             existing.token = Some(tok.to_string());
         }
+        if let Some(name) = user_name {
+            existing.user_name = Some(name.to_string());
+        }
+        if let Some(email) = user_email {
+            existing.user_email = Some(email.to_string());
+        }
         config::save_config(&cfg)?;
+        config::write_identity_configs(&cfg)?;
         println!("Updated route: {host}/{org}");
         return Ok(());
     }
@@ -69,8 +104,11 @@ pub fn add(host: &str, org: &str, ssh_key: Option<&str>, token: Option<&str>) ->
         org: org.to_string(),
         ssh_key: ssh_key.map(String::from),
         token: token.map(String::from),
+        user_name: user_name.map(String::from),
+        user_email: user_email.map(String::from),
     });
     config::save_config(&cfg)?;
+    config::write_identity_configs(&cfg)?;
     println!("Added route: {host}/{org}");
     Ok(())
 }
@@ -87,6 +125,33 @@ pub fn list() -> io::Result<()> {
     Ok(())
 }
 
+pub fn show() -> io::Result<()> {
+    let cfg = config::load_config()?;
+    if cfg.routes.is_empty() {
+        println!("No routes configured.");
+        return Ok(());
+    }
+    for (i, route) in cfg.routes.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        println!("[{}/{}]", route.host, route.org);
+        if let Some(key) = &route.ssh_key {
+            println!("  ssh_key    = {key}");
+        }
+        if route.token.is_some() {
+            println!("  token      = ***");
+        }
+        if let Some(name) = &route.user_name {
+            println!("  user_name  = {name}");
+        }
+        if let Some(email) = &route.user_email {
+            println!("  user_email = {email}");
+        }
+    }
+    Ok(())
+}
+
 pub fn remove(host: &str, org: &str) -> io::Result<()> {
     let mut cfg = config::load_config()?;
     let before = cfg.routes.len();
@@ -96,6 +161,7 @@ pub fn remove(host: &str, org: &str) -> io::Result<()> {
         return Ok(());
     }
     config::save_config(&cfg)?;
+    config::write_identity_configs(&cfg)?;
     println!("Removed route: {host}/{org}");
     Ok(())
 }
@@ -153,6 +219,30 @@ pub fn doctor() -> io::Result<()> {
         "git-router credential-helper",
         &mut all_ok,
     );
+
+    let identities_path = config::identities_gitconfig_path();
+    if identities_path.exists() {
+        println!("[pass] Identities config: {}", identities_path.display());
+    } else {
+        let has_identity = cfg
+            .as_ref()
+            .map(|c| {
+                c.routes
+                    .iter()
+                    .any(|r| r.user_name.is_some() || r.user_email.is_some())
+            })
+            .unwrap_or(false);
+        if has_identity {
+            println!(
+                "[FAIL] Identities config missing (run `git router init`): {}",
+                identities_path.display()
+            );
+            all_ok = false;
+        } else {
+            println!("[info] No per-route identities configured");
+        }
+    }
+
     check_ssh_agent(&mut all_ok);
 
     if all_ok {

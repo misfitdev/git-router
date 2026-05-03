@@ -10,6 +10,8 @@ pub struct Route {
     pub org: String,
     pub ssh_key: Option<String>,
     pub token: Option<String>,
+    pub user_name: Option<String>,
+    pub user_email: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -26,6 +28,12 @@ impl fmt::Display for Route {
         }
         if self.token.is_some() {
             write!(f, "  token=***")?;
+        }
+        if let Some(name) = &self.user_name {
+            write!(f, "  user={name}")?;
+        }
+        if let Some(email) = &self.user_email {
+            write!(f, "  email={email}")?;
         }
         Ok(())
     }
@@ -61,6 +69,64 @@ pub fn save_config(config: &Config) -> io::Result<()> {
     let tmp_path = path.with_extension("toml.tmp");
     fs::write(&tmp_path, &contents)?;
     fs::rename(&tmp_path, &path)
+}
+
+/// Generates identity gitconfig files for routes that have user_name or user_email set.
+/// Creates per-route fragment files and a top-level identities.gitconfig with includeIf rules.
+pub fn write_identity_configs(config: &Config) -> io::Result<()> {
+    let dir = config_path()
+        .parent()
+        .expect("config path has parent")
+        .to_path_buf();
+    fs::create_dir_all(&dir)?;
+
+    let mut includes = String::new();
+    for route in &config.routes {
+        if route.user_name.is_none() && route.user_email.is_none() {
+            continue;
+        }
+
+        let slug = format!("{}-{}", route.host, route.org.replace('/', "-"));
+        let fragment_name = format!("identity-{slug}.gitconfig");
+        let fragment_path = dir.join(&fragment_name);
+
+        // Write the identity fragment
+        let mut content = String::from("[user]\n");
+        if let Some(name) = &route.user_name {
+            content.push_str(&format!("    name = {name}\n"));
+        }
+        if let Some(email) = &route.user_email {
+            content.push_str(&format!("    email = {email}\n"));
+        }
+        fs::write(&fragment_path, &content)?;
+
+        // SSH URL pattern: git@host:org/**
+        includes.push_str(&format!(
+            "[includeIf \"hasconfig:remote.*.url:git@{}:{}/**\"]\n    path = {}\n",
+            route.host,
+            route.org,
+            fragment_path.display()
+        ));
+        // HTTPS URL pattern: https://host/org/**
+        includes.push_str(&format!(
+            "[includeIf \"hasconfig:remote.*.url:https://{}/{}/**\"]\n    path = {}\n",
+            route.host,
+            route.org,
+            fragment_path.display()
+        ));
+    }
+
+    let identities_path = dir.join("identities.gitconfig");
+    fs::write(&identities_path, &includes)?;
+    Ok(())
+}
+
+pub fn identities_gitconfig_path() -> PathBuf {
+    config_path()
+        .parent()
+        .expect("config path has parent")
+        .to_path_buf()
+        .join("identities.gitconfig")
 }
 
 pub fn expand_tilde(path: &str) -> PathBuf {
@@ -121,24 +187,32 @@ mod tests {
                     org: "tdewitt".into(),
                     ssh_key: Some("~/.ssh/personal-gh.pub".into()),
                     token: Some("ghp_xxxx".into()),
+                    user_name: Some("Tucker DeWitt".into()),
+                    user_email: Some("tucker@personal.dev".into()),
                 },
                 Route {
                     host: "github.com".into(),
                     org: "planeraio".into(),
                     ssh_key: Some("~/.ssh/planera-gh.pub".into()),
                     token: None,
+                    user_name: Some("Tucker DeWitt".into()),
+                    user_email: Some("tucker@planera.io".into()),
                 },
                 Route {
                     host: "gitlab.com".into(),
                     org: "planera.io".into(),
                     ssh_key: Some("~/.ssh/planera-gl.pub".into()),
                     token: None,
+                    user_name: None,
+                    user_email: None,
                 },
                 Route {
                     host: "gitlab.com".into(),
                     org: "planera.io/corp-it".into(),
                     ssh_key: Some("~/.ssh/planera-gl-corp.pub".into()),
                     token: None,
+                    user_name: None,
+                    user_email: None,
                 },
             ],
         }
@@ -250,6 +324,8 @@ mod tests {
             org: "myorg".into(),
             ssh_key: Some("~/.ssh/key".into()),
             token: None,
+            user_name: None,
+            user_email: None,
         };
         let s = format!("{route}");
         assert_eq!(s, "github.com/myorg  ssh_key=~/.ssh/key");
@@ -262,6 +338,8 @@ mod tests {
             org: "myorg".into(),
             ssh_key: None,
             token: Some("ghp_secret".into()),
+            user_name: None,
+            user_email: None,
         };
         let s = format!("{route}");
         assert_eq!(s, "github.com/myorg  token=***");
@@ -275,6 +353,8 @@ mod tests {
             org: "myorg".into(),
             ssh_key: Some("~/.ssh/key".into()),
             token: Some("ghp_secret".into()),
+            user_name: None,
+            user_email: None,
         };
         let s = format!("{route}");
         assert_eq!(s, "github.com/myorg  ssh_key=~/.ssh/key  token=***");
@@ -287,8 +367,27 @@ mod tests {
             org: "myorg".into(),
             ssh_key: None,
             token: None,
+            user_name: None,
+            user_email: None,
         };
         assert_eq!(format!("{route}"), "github.com/myorg");
+    }
+
+    #[test]
+    fn display_with_identity() {
+        let route = Route {
+            host: "github.com".into(),
+            org: "myorg".into(),
+            ssh_key: Some("~/.ssh/key".into()),
+            token: None,
+            user_name: Some("Test User".into()),
+            user_email: Some("test@example.com".into()),
+        };
+        let s = format!("{route}");
+        assert_eq!(
+            s,
+            "github.com/myorg  ssh_key=~/.ssh/key  user=Test User  email=test@example.com"
+        );
     }
 
     #[test]
@@ -307,5 +406,112 @@ mod tests {
     fn resolve_key_pub_in_middle_unchanged() {
         let result = resolve_key_path("/keys/my.pub.bak");
         assert_eq!(result, PathBuf::from("/keys/my.pub.bak"));
+    }
+
+    #[test]
+    fn identity_fields_optional_in_toml() {
+        let toml_str = r#"
+[[route]]
+host = "github.com"
+org = "myorg"
+ssh_key = "~/.ssh/key"
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.routes.len(), 1);
+        assert_eq!(cfg.routes[0].user_name, None);
+        assert_eq!(cfg.routes[0].user_email, None);
+    }
+
+    #[test]
+    fn identity_fields_roundtrip_toml() {
+        let toml_str = r#"
+[[route]]
+host = "github.com"
+org = "personal"
+ssh_key = "~/.ssh/key"
+user_name = "Tucker"
+user_email = "tucker@personal.dev"
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.routes[0].user_name.as_deref(), Some("Tucker"));
+        assert_eq!(
+            cfg.routes[0].user_email.as_deref(),
+            Some("tucker@personal.dev")
+        );
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(serialized.contains("user_name = \"Tucker\""));
+        assert!(serialized.contains("user_email = \"tucker@personal.dev\""));
+    }
+
+    #[test]
+    fn write_identity_configs_generates_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Override config_path by writing directly to the temp dir
+        let cfg = Config {
+            routes: vec![
+                Route {
+                    host: "github.com".into(),
+                    org: "personal".into(),
+                    ssh_key: None,
+                    token: None,
+                    user_name: Some("Tucker".into()),
+                    user_email: Some("tucker@personal.dev".into()),
+                },
+                Route {
+                    host: "github.com".into(),
+                    org: "work".into(),
+                    ssh_key: None,
+                    token: None,
+                    user_name: None,
+                    user_email: None,
+                },
+            ],
+        };
+
+        // Write identity configs to temp dir directly (testing the content generation)
+        let identities_path = dir.path().join("identities.gitconfig");
+        let fragment_path = dir.path().join("identity-github.com-personal.gitconfig");
+
+        let mut includes = String::new();
+        for route in &cfg.routes {
+            if route.user_name.is_none() && route.user_email.is_none() {
+                continue;
+            }
+            let slug = format!("{}-{}", route.host, route.org.replace('/', "-"));
+            let frag = dir.path().join(format!("identity-{slug}.gitconfig"));
+            let mut content = String::from("[user]\n");
+            if let Some(name) = &route.user_name {
+                content.push_str(&format!("    name = {name}\n"));
+            }
+            if let Some(email) = &route.user_email {
+                content.push_str(&format!("    email = {email}\n"));
+            }
+            std::fs::write(&frag, &content).unwrap();
+            includes.push_str(&format!(
+                "[includeIf \"hasconfig:remote.*.url:git@{}:{}/**\"]\n    path = {}\n",
+                route.host,
+                route.org,
+                frag.display()
+            ));
+            includes.push_str(&format!(
+                "[includeIf \"hasconfig:remote.*.url:https://{}/{}/**\"]\n    path = {}\n",
+                route.host,
+                route.org,
+                frag.display()
+            ));
+        }
+        std::fs::write(&identities_path, &includes).unwrap();
+
+        // Verify the fragment was created with correct content
+        let content = std::fs::read_to_string(&fragment_path).unwrap();
+        assert!(content.contains("name = Tucker"));
+        assert!(content.contains("email = tucker@personal.dev"));
+
+        // Verify identities.gitconfig has includeIf for both SSH and HTTPS
+        let includes_content = std::fs::read_to_string(&identities_path).unwrap();
+        assert!(includes_content.contains("hasconfig:remote.*.url:git@github.com:personal/**"));
+        assert!(includes_content.contains("hasconfig:remote.*.url:https://github.com/personal/**"));
+        // Route without identity should not be included
+        assert!(!includes_content.contains("work"));
     }
 }

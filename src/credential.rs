@@ -131,12 +131,16 @@ mod tests {
                     org: "planera.io".into(),
                     ssh_key: None,
                     token: Some("tok-org".into()),
+                    user_name: None,
+                    user_email: None,
                 },
                 Route {
                     host: "gitlab.com".into(),
                     org: "planera.io/corp-it".into(),
                     ssh_key: None,
                     token: Some("tok-corp-it".into()),
+                    user_name: None,
+                    user_email: None,
                 },
             ],
         };

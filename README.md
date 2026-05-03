@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-Route SSH keys and HTTPS credentials by matching the org/namespace in
-git remote URLs. Replaces SSH host aliases and <code>url.&lt;base&gt;.insteadOf</code>
-rules.
+Route SSH keys, HTTPS credentials, and committer identity by matching
+the org/namespace in git remote URLs. Replaces SSH host aliases,
+<code>url.&lt;base&gt;.insteadOf</code> rules, and per-directory gitconfig includes.
 </p>
 
 <p align="center">
@@ -67,9 +67,11 @@ gh attestation verify git-router-*.tar.gz --owner misfitdev
 # Wire git-router into global gitconfig
 git router init
 
-# Add routes
-git router add github.com personal --ssh-key ~/.ssh/personal.pub
-git router add github.com work-org --ssh-key ~/.ssh/work.pub --token ghp_xxxx
+# Add routes (with optional per-route identity)
+git router add github.com personal --ssh-key ~/.ssh/personal.pub \
+  --user-name "Tucker" --user-email "tucker@personal.dev"
+git router add github.com work-org --ssh-key ~/.ssh/work.pub --token ghp_xxxx \
+  --user-name "Tucker DeWitt" --user-email "tucker@work.com"
 git router add gitlab.com my-group --ssh-key ~/.ssh/gitlab.pub
 
 # Verify setup
@@ -77,17 +79,21 @@ git router doctor
 ```
 
 Now `git clone`, `git fetch`, and `git push` automatically use the right
-SSH key and HTTPS token based on the org in the remote URL.
+SSH key, HTTPS token, and committer identity based on the org in the
+remote URL.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `git router init` | Write `core.sshCommand` and `credential.helper` to global gitconfig |
-| `git router add <host> <org> [--ssh-key PATH] [--token TOKEN]` | Add or update a route |
-| `git router list` | Print the route table |
+| `git router init` | Wire git-router into global gitconfig (idempotent) |
+| `git router add <host> <org> [OPTIONS]` | Add or update a route |
+| `git router show` | Print all routes with full details |
+| `git router list` | Print routes as one-liners |
 | `git router remove <host> <org>` | Remove a route |
-| `git router doctor` | Verify config, keys, gitconfig wiring, and SSH agent |
+| `git router doctor` | Verify config, keys, and gitconfig wiring |
+
+Options for `add`: `--ssh-key PATH`, `--token TOKEN`, `--user-name NAME`, `--user-email EMAIL`
 
 ## Config
 
@@ -98,12 +104,16 @@ Routes live in `~/.config/git-router/config.toml`:
 host = "github.com"
 org = "personal"
 ssh_key = "~/.ssh/personal.pub"
+user_name = "Tucker"
+user_email = "tucker@personal.dev"
 
 [[route]]
 host = "github.com"
 org = "work-org"
 ssh_key = "~/.ssh/work.pub"
 token = "ghp_xxxx"
+user_name = "Tucker DeWitt"
+user_email = "tucker@work.com"
 
 [[route]]
 host = "gitlab.com"
@@ -111,26 +121,40 @@ org = "my-group"
 ssh_key = "~/.ssh/gitlab.pub"
 ```
 
-For GitLab nested groups, routes match progressively shorter path
-prefixes. A route for `my-group/infra` matches before a broader
-`my-group` route.
+`user_name` and `user_email` are optional. Routes without them fall back
+to whatever `user.name`/`user.email` is set in your global gitconfig.
+
+### Route matching
+
+The `<org>` argument is separate from `<host>` and can contain slashes
+for nested namespaces:
+
+```sh
+git router add gitlab.com acme --ssh-key ~/.ssh/gl-acme.pub
+git router add gitlab.com acme/foo --ssh-key ~/.ssh/gl-foo.pub
+```
+
+When resolving a remote like `gitlab.com:acme/foo/bar.git`,
+git-router tries progressively shorter path prefixes until it finds a
+match: `acme/foo` matches before falling back to `acme`.
 
 ## How it works
 
-`git-router` is a single binary with three modes, detected by how git
-invokes it:
+`git-router` is a single binary that git invokes at two points during
+remote operations:
 
-**SSH wrapper** (`core.sshCommand = git-router ssh-wrap`) -- git calls
-this for SSH remotes. It parses the host and org from the SSH arguments,
-looks up the matching route, and execs `ssh` with the correct
-`IdentityFile`.
+**SSH wrapper** (`core.sshCommand = git-router ssh-wrap`) -- for SSH
+remotes. Parses the host and org from the SSH arguments, looks up the
+matching route, and execs `ssh` with the correct `IdentityFile`.
 
 **Credential helper** (`credential.helper = git-router credential-helper`)
--- git calls this for HTTPS remotes. It reads the host and path from
-stdin, matches a route, and returns the token.
+-- for HTTPS remotes. Reads the host and path from stdin, matches a
+route, and returns the token.
 
-**CLI** (`git router <subcommand>`) -- manages routes and verifies
-configuration.
+**Identity** -- `git router init` generates gitconfig `includeIf` fragments
+that set `user.name` and `user.email` based on the remote URL. This is
+static config, not a runtime hook -- git evaluates it directly. Requires
+git 2.36+.
 
 ### Design constraints
 

@@ -33,10 +33,19 @@ enum Commands {
         /// HTTPS token
         #[arg(long)]
         token: Option<String>,
+        /// Git user.name for commits in repos matching this route
+        #[arg(long)]
+        user_name: Option<String>,
+        /// Git user.email for commits in repos matching this route
+        #[arg(long)]
+        user_email: Option<String>,
     },
 
     /// List all configured routes
     List,
+
+    /// Show full configuration details
+    Show,
 
     /// Remove a route
     Remove {
@@ -75,8 +84,18 @@ fn main() {
             org,
             ssh_key,
             token,
-        } => cli::add(&host, &org, ssh_key.as_deref(), token.as_deref()),
+            user_name,
+            user_email,
+        } => cli::add(
+            &host,
+            &org,
+            ssh_key.as_deref(),
+            token.as_deref(),
+            user_name.as_deref(),
+            user_email.as_deref(),
+        ),
         Commands::List => cli::list(),
+        Commands::Show => cli::show(),
         Commands::Remove { host, org } => cli::remove(&host, &org),
         Commands::Doctor => cli::doctor(),
         Commands::SshWrap { args } => ssh_wrap::run(&args),
