@@ -3,7 +3,8 @@ mod config;
 mod credential;
 mod ssh_wrap;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(
@@ -72,6 +73,12 @@ enum Commands {
         /// Operation: get, store, or erase
         operation: String,
     },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate for
+        shell: Shell,
+    },
 }
 
 fn main() {
@@ -101,6 +108,15 @@ fn main() {
         Commands::SshWrap { args } => ssh_wrap::run(&args),
         Commands::CredentialHelper { operation } => {
             credential::run(&operation);
+            Ok(())
+        }
+        Commands::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "git-router",
+                &mut std::io::stdout(),
+            );
             Ok(())
         }
     };
