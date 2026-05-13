@@ -9,6 +9,21 @@ fn with_config_dir<'a>(cmd: &'a mut Command, dir: &std::path::Path) -> &'a mut C
 }
 
 #[test]
+fn completions_generate() {
+    let output = git_router().args(["completions", "zsh"]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "completions failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("#compdef git-router"),
+        "should produce valid zsh completion: {stdout}"
+    );
+}
+
+#[test]
 fn add_list_remove_roundtrip() {
     let tmp = tempfile::tempdir().unwrap();
     let tmp_path = tmp.path();
