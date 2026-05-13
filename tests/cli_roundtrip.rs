@@ -24,6 +24,53 @@ fn completions_generate() {
 }
 
 #[test]
+fn init_writes_gitconfig() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tmp_path = tmp.path();
+
+    let output = with_config_dir(&mut git_router(), tmp_path)
+        .args(["init"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify gitconfig entries
+    let gitconfig = std::fs::read_to_string(tmp_path.join(".gitconfig")).unwrap();
+    assert!(
+        gitconfig.contains("sshCommand = git-router ssh-wrap"),
+        "missing core.sshCommand: {gitconfig}"
+    );
+    assert!(
+        gitconfig.contains("helper = git-router credential-helper"),
+        "missing credential.helper: {gitconfig}"
+    );
+    assert!(
+        gitconfig.contains("identities.gitconfig"),
+        "missing include.path for identities: {gitconfig}"
+    );
+
+    // Running init again should be idempotent (no duplicate entries)
+    let output = with_config_dir(&mut git_router(), tmp_path)
+        .args(["init"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "second init failed");
+
+    let gitconfig = std::fs::read_to_string(tmp_path.join(".gitconfig")).unwrap();
+    assert_eq!(
+        gitconfig
+            .matches("sshCommand = git-router ssh-wrap")
+            .count(),
+        1,
+        "init should be idempotent: {gitconfig}"
+    );
+}
+
+#[test]
 fn add_list_remove_roundtrip() {
     let tmp = tempfile::tempdir().unwrap();
     let tmp_path = tmp.path();
