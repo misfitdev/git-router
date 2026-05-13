@@ -8,6 +8,7 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -72,9 +73,28 @@ jobs:
           name: git-router-${{ matrix.target }}
           path: git-router-${{ matrix.target }}.tar.gz
 
+  attest:
+    name: Attest
+    needs: build
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    uses: misfitdev/.github/.github/workflows/attest.yml@main
+    with:
+      subject-path: "artifacts/*.tar.gz"
+
+  verify:
+    name: Verify
+    needs: attest
+    permissions: {}
+    uses: misfitdev/.github/.github/workflows/verify.yml@main
+    with:
+      artifact-path: "artifacts/*.tar.gz"
+
   release:
     name: Release
-    needs: build
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -89,11 +109,6 @@ jobs:
           cd artifacts
           sha256sum git-router-*.tar.gz > SHA256SUMS
           cat SHA256SUMS
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: artifacts/*
 
       - name: Create GitHub release
         env:

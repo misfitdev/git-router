@@ -5,7 +5,7 @@
 <a href="https://github.com/misfitdev/git-router/actions/workflows/release.yml"><img src="https://github.com/misfitdev/git-router/actions/workflows/release.yml/badge.svg" alt="Release"></a>
 <a href="https://crates.io/crates/git-router"><img src="https://img.shields.io/crates/v/git-router" alt="Crates.io"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-<a href="https://github.com/misfitdev/git-router/attestations"><img src="https://slsa.dev/images/gh-badge-level1.svg" alt="SLSA 1"></a>
+<a href="https://github.com/misfitdev/git-router/attestations"><img src="https://slsa.dev/images/gh-badge-level3.svg" alt="SLSA 3"></a>
 </p>
 
 <p align="center">
