@@ -1,6 +1,6 @@
 [package]
 name = "git-router"
-version = "0.2.0"
+version = "0.0.0-dev"
 edition = "2024"
 description = "Route SSH keys, HTTPS credentials, and committer identity by org/namespace in git remote URLs"
 license = "MIT"
