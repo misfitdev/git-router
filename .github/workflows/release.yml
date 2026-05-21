@@ -90,21 +90,38 @@ jobs:
   attest:
     name: Attest
     needs: build
+    runs-on: ubuntu-latest
     permissions:
       id-token: write
       attestations: write
       contents: read
-    uses: misfitdev/.github/.github/workflows/attest.yml@main
-    with:
-      subject-path: "artifacts/*.tar.gz"
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: "artifacts/*.tar.gz"
 
   verify:
     name: Verify
     needs: attest
+    runs-on: ubuntu-latest
     permissions: {}
-    uses: misfitdev/.github/.github/workflows/verify.yml@main
-    with:
-      artifact-path: "artifacts/*.tar.gz"
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in artifacts/*.tar.gz; do
+            gh attestation verify "$f" --repo "${{ github.repository }}"
+          done
 
   release:
     name: Release
