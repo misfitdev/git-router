@@ -39,6 +39,38 @@ impl fmt::Display for Route {
     }
 }
 
+/// Rejects characters that can break gitconfig value syntax (newlines, section markers).
+pub fn validate_gitconfig_value(field: &str, value: &str) -> io::Result<()> {
+    if value.contains(['\n', '\r', '\0', '[', ']']) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{field} contains characters unsafe for gitconfig"),
+        ));
+    }
+    Ok(())
+}
+
+/// Rejects characters unsafe for gitconfig patterns, filenames, and glob expressions.
+/// Stricter than `validate_gitconfig_value` because host/org appear in includeIf
+/// patterns and fragment filenames.
+pub fn validate_route_key(field: &str, value: &str) -> io::Result<()> {
+    if value.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{field} must not be empty"),
+        ));
+    }
+    if value.contains([
+        '\n', '\r', '\0', '[', ']', '"', '\'', '\\', ' ', '*', '?', '#', ';', '=',
+    ]) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{field} contains characters unsafe for gitconfig"),
+        ));
+    }
+    Ok(())
+}
+
 pub fn config_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
@@ -84,6 +116,16 @@ pub fn write_identity_configs(config: &Config) -> io::Result<()> {
     for route in &config.routes {
         if route.user_name.is_none() && route.user_email.is_none() {
             continue;
+        }
+
+        // Defense-in-depth: catch hand-edited configs with unsafe values.
+        validate_route_key("host", &route.host)?;
+        validate_route_key("org", &route.org)?;
+        if let Some(name) = &route.user_name {
+            validate_gitconfig_value("user_name", name)?;
+        }
+        if let Some(email) = &route.user_email {
+            validate_gitconfig_value("user_email", email)?;
         }
 
         let slug = format!("{}-{}", route.host, route.org.replace('/', "-"));
@@ -406,6 +448,44 @@ mod tests {
     fn resolve_key_pub_in_middle_unchanged() {
         let result = resolve_key_path("/keys/my.pub.bak");
         assert_eq!(result, PathBuf::from("/keys/my.pub.bak"));
+    }
+
+    #[test]
+    fn validate_gitconfig_value_rejects_newline() {
+        assert!(validate_gitconfig_value("user_name", "Alice\n[core]").is_err());
+    }
+
+    #[test]
+    fn validate_gitconfig_value_rejects_brackets() {
+        assert!(validate_gitconfig_value("user_name", "[evil]").is_err());
+    }
+
+    #[test]
+    fn validate_gitconfig_value_accepts_normal() {
+        assert!(validate_gitconfig_value("user_name", "Tucker DeWitt").is_ok());
+        assert!(validate_gitconfig_value("user_email", "tucker@example.com").is_ok());
+    }
+
+    #[test]
+    fn validate_route_key_rejects_spaces() {
+        assert!(validate_route_key("host", "github .com").is_err());
+    }
+
+    #[test]
+    fn validate_route_key_rejects_empty() {
+        assert!(validate_route_key("host", "").is_err());
+    }
+
+    #[test]
+    fn validate_route_key_rejects_quotes() {
+        assert!(validate_route_key("org", "org\"evil").is_err());
+    }
+
+    #[test]
+    fn validate_route_key_accepts_normal() {
+        assert!(validate_route_key("host", "github.com").is_ok());
+        assert!(validate_route_key("org", "my-org").is_ok());
+        assert!(validate_route_key("org", "planera.io/corp-it").is_ok());
     }
 
     #[test]

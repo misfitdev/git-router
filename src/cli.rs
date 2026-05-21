@@ -74,6 +74,15 @@ pub fn add(
         ));
     }
 
+    config::validate_route_key("host", host)?;
+    config::validate_route_key("org", org)?;
+    if let Some(name) = user_name {
+        config::validate_gitconfig_value("user_name", name)?;
+    }
+    if let Some(email) = user_email {
+        config::validate_gitconfig_value("user_email", email)?;
+    }
+
     let mut cfg = config::load_config()?;
 
     if let Some(existing) = cfg

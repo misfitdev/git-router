@@ -9,6 +9,47 @@ fn with_config_dir<'a>(cmd: &'a mut Command, dir: &std::path::Path) -> &'a mut C
 }
 
 #[test]
+fn add_rejects_injection_in_user_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = with_config_dir(&mut git_router(), tmp.path())
+        .args([
+            "add",
+            "github.com",
+            "testorg",
+            "--ssh-key",
+            "~/.ssh/test.pub",
+            "--user-name",
+            "Alice\n[core]\n    sshCommand = evil",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "should reject injection in user_name"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unsafe"), "stderr: {stderr}");
+}
+
+#[test]
+fn add_rejects_injection_in_host() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = with_config_dir(&mut git_router(), tmp.path())
+        .args([
+            "add",
+            "github.com\n[evil]",
+            "testorg",
+            "--ssh-key",
+            "~/.ssh/test.pub",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "should reject injection in host");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unsafe"), "stderr: {stderr}");
+}
+
+#[test]
 fn completions_generate() {
     let output = git_router().args(["completions", "zsh"]).output().unwrap();
     assert!(
