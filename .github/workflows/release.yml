@@ -94,7 +94,7 @@ jobs:
       id-token: write
       attestations: write
       contents: read
-    uses: misfitdev/.github/.github/workflows/attest.yml@058925a39f0a6932e7363073bcc79d59c4032984 # main
+    uses: misfitdev/.github/.github/workflows/attest.yml@main
     with:
       subject-path: "artifacts/*.tar.gz"
 
@@ -102,7 +102,7 @@ jobs:
     name: Verify
     needs: attest
     permissions: {}
-    uses: misfitdev/.github/.github/workflows/verify.yml@058925a39f0a6932e7363073bcc79d59c4032984 # main
+    uses: misfitdev/.github/.github/workflows/verify.yml@main
     with:
       artifact-path: "artifacts/*.tar.gz"
 
