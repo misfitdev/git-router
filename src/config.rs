@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Route {
@@ -71,6 +71,38 @@ pub fn validate_route_key(field: &str, value: &str) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn create_dir_private(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+}
+
+#[cfg(not(unix))]
+fn create_dir_private(path: &Path) -> io::Result<()> {
+    fs::create_dir_all(path)
+}
+
+#[cfg(unix)]
+fn write_private(path: &Path, contents: &str) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(contents.as_bytes())
+}
+
+#[cfg(not(unix))]
+fn write_private(path: &Path, contents: &str) -> io::Result<()> {
+    fs::write(path, contents)
+}
+
 pub fn config_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
@@ -95,12 +127,18 @@ pub fn save_config(config: &Config) -> io::Result<()> {
             "config path has no parent directory",
         )
     })?;
-    fs::create_dir_all(parent)?;
+    create_dir_private(parent)?;
     let contents = toml::to_string_pretty(config).map_err(io::Error::other)?;
     // Write to a temp file in the same directory, then rename for atomic replacement.
     let tmp_path = path.with_extension("toml.tmp");
-    fs::write(&tmp_path, &contents)?;
-    fs::rename(&tmp_path, &path)
+    write_private(&tmp_path, &contents)?;
+    fs::rename(&tmp_path, &path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 /// Generates identity gitconfig files for routes that have user_name or user_email set.
@@ -110,7 +148,7 @@ pub fn write_identity_configs(config: &Config) -> io::Result<()> {
         .parent()
         .expect("config path has parent")
         .to_path_buf();
-    fs::create_dir_all(&dir)?;
+    create_dir_private(&dir)?;
 
     let mut includes = String::new();
     for route in &config.routes {
@@ -140,7 +178,7 @@ pub fn write_identity_configs(config: &Config) -> io::Result<()> {
         if let Some(email) = &route.user_email {
             content.push_str(&format!("    email = {email}\n"));
         }
-        fs::write(&fragment_path, &content)?;
+        write_private(&fragment_path, &content)?;
 
         // SSH URL pattern: git@host:org/**
         includes.push_str(&format!(
@@ -159,7 +197,7 @@ pub fn write_identity_configs(config: &Config) -> io::Result<()> {
     }
 
     let identities_path = dir.join("identities.gitconfig");
-    fs::write(&identities_path, &includes)?;
+    write_private(&identities_path, &includes)?;
     Ok(())
 }
 
@@ -486,6 +524,28 @@ mod tests {
         assert!(validate_route_key("host", "github.com").is_ok());
         assert!(validate_route_key("org", "my-org").is_ok());
         assert!(validate_route_key("org", "planera.io/corp-it").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_private_sets_mode_600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret.toml");
+        write_private(&path, "token = \"ghp_secret\"").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "expected 0600, got {mode:04o}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_dir_private_sets_mode_700() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("private-dir");
+        create_dir_private(&nested).unwrap();
+        let mode = std::fs::metadata(&nested).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "expected 0700, got {mode:04o}");
     }
 
     #[test]
