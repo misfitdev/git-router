@@ -26,23 +26,43 @@ pub fn parse_org_path(git_command_args: &[String]) -> Option<String> {
     Some(cleaned.to_string())
 }
 
-/// SSH options that consume the next argument as a value.
-const SSH_OPTS_WITH_VALUE: &[&str] = &[
-    "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q",
-    "-R", "-S", "-W", "-w",
+/// SSH option letters that consume a value (see ssh(1)).
+const SSH_OPTS_WITH_VALUE: &[char] = &[
+    'B', 'b', 'c', 'D', 'E', 'e', 'F', 'I', 'i', 'J', 'L', 'l', 'm', 'O', 'o', 'p', 'Q', 'R', 'S',
+    'W', 'w',
 ];
+
+/// Whether a flag argument consumes the following argument as its value.
+///
+/// Short flags bundle (`-vp 2222` is `-v -p 2222`) and may carry an attached
+/// value (`-p2222`), so only a value-taking letter in final position consumes
+/// the next argument.
+fn consumes_next(arg: &str) -> bool {
+    let Some(letters) = arg.strip_prefix('-') else {
+        return false;
+    };
+    if letters.is_empty() || letters.starts_with('-') {
+        return false;
+    }
+    match letters
+        .char_indices()
+        .find(|(_, c)| SSH_OPTS_WITH_VALUE.contains(c))
+    {
+        Some((idx, c)) => idx + c.len_utf8() == letters.len(),
+        None => false,
+    }
+}
 
 /// Find the destination argument by skipping SSH flags.
 /// Returns (destination_index, git_command_start_index).
 pub fn find_destination(args: &[String]) -> Option<(usize, usize)> {
     let mut i = 0;
     while i < args.len() {
-        if SSH_OPTS_WITH_VALUE.contains(&args[i].as_str()) {
+        if consumes_next(&args[i]) {
             i += 2; // skip flag + value
         } else if args[i].starts_with('-') {
-            i += 1; // standalone flag
+            i += 1; // standalone flag, or flag with attached value
         } else {
-            // first non-flag arg is the destination
             return Some((i, i + 1));
         }
     }
@@ -111,6 +131,40 @@ fn exec_ssh(args: &[String]) -> ! {
 mod tests {
     use super::*;
 
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn find_destination_skips_bundled_short_flags() {
+        // -vp 2222 is -v -p 2222; the port must not be read as the destination.
+        let a = args(&["-vp", "2222", "git@github.com", "git-upload-pack", "x"]);
+        assert_eq!(find_destination(&a), Some((2, 3)));
+    }
+
+    #[test]
+    fn find_destination_handles_attached_option_value() {
+        let a = args(&["-p2222", "git@github.com", "git-upload-pack", "x"]);
+        assert_eq!(find_destination(&a), Some((1, 2)));
+    }
+
+    #[test]
+    fn find_destination_handles_separated_option_value() {
+        let a = args(&["-o", "Foo=bar", "-p", "22", "git@github.com"]);
+        assert_eq!(find_destination(&a), Some((4, 5)));
+    }
+
+    #[test]
+    fn find_destination_treats_valueless_bundles_as_flags() {
+        let a = args(&["-4qT", "git@github.com"]);
+        assert_eq!(find_destination(&a), Some((1, 2)));
+    }
+
+    #[test]
+    fn find_destination_returns_none_without_destination() {
+        assert_eq!(find_destination(&args(&["-v", "-p"])), None);
+    }
+
     #[test]
     fn parse_host_with_user() {
         assert_eq!(parse_host("git@github.com"), "github.com");
@@ -130,20 +184,20 @@ mod tests {
     fn parse_org_simple() {
         let args = vec![
             "git-upload-pack".to_string(),
-            "'/planeraio/repo.git'".to_string(),
+            "'/acmecorp/repo.git'".to_string(),
         ];
-        assert_eq!(parse_org_path(&args).unwrap(), "planeraio/repo.git");
+        assert_eq!(parse_org_path(&args).unwrap(), "acmecorp/repo.git");
     }
 
     #[test]
     fn parse_org_nested_gitlab() {
         let args = vec![
             "git-upload-pack".to_string(),
-            "'/planera.io/corp-it/auto-it.git'".to_string(),
+            "'/acme.dev/platform/service.git'".to_string(),
         ];
         assert_eq!(
             parse_org_path(&args).unwrap(),
-            "planera.io/corp-it/auto-it.git"
+            "acme.dev/platform/service.git"
         );
     }
 
@@ -151,9 +205,9 @@ mod tests {
     fn parse_org_no_leading_slash() {
         let args = vec![
             "git-upload-pack".to_string(),
-            "'planeraio/repo.git'".to_string(),
+            "'acmecorp/repo.git'".to_string(),
         ];
-        assert_eq!(parse_org_path(&args).unwrap(), "planeraio/repo.git");
+        assert_eq!(parse_org_path(&args).unwrap(), "acmecorp/repo.git");
     }
 
     #[test]

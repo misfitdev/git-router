@@ -92,12 +92,20 @@ remote URL.
 | `git router list` | Print routes as one-liners |
 | `git router remove <host> <org>` | Remove a route |
 | `git router doctor` | Verify config, keys, and gitconfig wiring |
+| `git router completions <shell>` | Print a shell completion script |
 
 Options for `add`: `--ssh-key PATH`, `--token TOKEN`, `--user-name NAME`, `--user-email EMAIL`
 
+`doctor` exits non-zero when any check fails.
+
 ## Config
 
-Routes live in `~/.config/git-router/config.toml`:
+Routes live in the OS config directory:
+
+| Platform | Path |
+|----------|------|
+| Linux    | `~/.config/git-router/config.toml` |
+| macOS    | `~/Library/Application Support/git-router/config.toml` |
 
 ```toml
 [[route]]
@@ -124,6 +132,21 @@ ssh_key = "~/.ssh/gitlab.pub"
 `user_name` and `user_email` are optional. Routes without them fall back
 to whatever `user.name`/`user.email` is set in your global gitconfig.
 
+> **Include ordering.** Git applies the last value it reads. `git router init`
+> appends its `include.path` to the end of your global gitconfig, so a
+> `user.name`/`user.email` written *below* that include overrides every routed
+> identity. `git router doctor` warns when it detects this.
+
+Two kinds of file sit next to `config.toml`, both generated:
+
+| File | Contents |
+|------|----------|
+| `git-router.gitconfig` | The single file `include.path` points at: credential sections and identity `includeIf` rules |
+| `identity-<host>-<org>.gitconfig` | One committer identity per route that sets one |
+
+They are rewritten in full on every `init`, `add`, and `remove`. Edit
+`config.toml` instead; hand edits to the generated files are discarded.
+
 ### Route matching
 
 The `<org>` argument is separate from `<host>` and can contain slashes
@@ -147,9 +170,22 @@ remote operations:
 remotes. Parses the host and org from the SSH arguments, looks up the
 matching route, and execs `ssh` with the correct `IdentityFile`.
 
-**Credential helper** (`credential.helper = git-router credential-helper`)
--- for HTTPS remotes. Reads the host and path from stdin, matches a
-route, and returns the token.
+**Credential helper** -- for HTTPS remotes. `git router init` writes a
+per-route section into its generated gitconfig rather than registering a
+global helper:
+
+```
+[credential "https://github.com/work-org"]
+    useHttpPath = true
+    helper = ""
+    helper = "!git-router credential-helper"
+```
+
+Without `useHttpPath`, git omits the repo path and routes on the same host are
+indistinguishable; setting it per route rather than globally leaves credential
+lookup unchanged for every other host. Without the empty `helper`, a helper
+declared earlier in your global config answers first and git-router is never
+invoked. Sections are emitted only for routes that carry a token.
 
 **Identity** -- `git router init` generates gitconfig `includeIf` fragments
 that set `user.name` and `user.email` based on the remote URL. This is
@@ -159,10 +195,15 @@ git 2.36+.
 ### Design constraints
 
 - Never modifies `~/.ssh/config`
-- Passes through on no match -- never blocks a git operation
+- Never removes or reorders credential helpers you configured yourself
+- Passes through on no match -- never blocks a git operation. The one
+  exception is an org with a token configured: those URLs are handled by
+  git-router alone, so a corrupt `config.toml` prompts rather than falling
+  back to another helper.
 - No daemons, no background processes, no temp files
 - Atomic config writes (write-then-rename)
 - Exit codes pass through from `ssh` or credential operations
+- `git router doctor` exits non-zero when a check fails
 
 ## Security
 

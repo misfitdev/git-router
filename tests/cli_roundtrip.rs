@@ -79,22 +79,20 @@ fn init_writes_gitconfig() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // Verify gitconfig entries
     let gitconfig = std::fs::read_to_string(tmp_path.join(".gitconfig")).unwrap();
     assert!(
         gitconfig.contains("sshCommand = git-router ssh-wrap"),
         "missing core.sshCommand: {gitconfig}"
     );
     assert!(
-        gitconfig.contains("helper = git-router credential-helper"),
-        "missing credential.helper: {gitconfig}"
+        !gitconfig.contains("helper = git-router credential-helper"),
+        "init must not write a global credential.helper; git cannot invoke it: {gitconfig}"
     );
     assert!(
-        gitconfig.contains("identities.gitconfig"),
-        "missing include.path for identities: {gitconfig}"
+        gitconfig.contains("git-router.gitconfig"),
+        "missing include.path for generated config: {gitconfig}"
     );
 
-    // Running init again should be idempotent (no duplicate entries)
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["init"])
         .output()
@@ -116,7 +114,6 @@ fn add_list_remove_roundtrip() {
     let tmp = tempfile::tempdir().unwrap();
     let tmp_path = tmp.path();
 
-    // Add a route
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args([
             "add",
@@ -133,7 +130,6 @@ fn add_list_remove_roundtrip() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // List should show the route
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["list"])
         .output()
@@ -149,7 +145,6 @@ fn add_list_remove_roundtrip() {
         "list output: {stdout}"
     );
 
-    // Add a second route with a token
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args([
             "add",
@@ -164,7 +159,6 @@ fn add_list_remove_roundtrip() {
         .unwrap();
     assert!(output.status.success());
 
-    // List should show both routes
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["list"])
         .output()
@@ -183,7 +177,6 @@ fn add_list_remove_roundtrip() {
         "token should be masked: {stdout}"
     );
 
-    // Update existing route
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["add", "github.com", "testorg", "--token", "ghp_updated"])
         .output()
@@ -192,7 +185,6 @@ fn add_list_remove_roundtrip() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Updated"), "should say updated: {stdout}");
 
-    // Verify partial update: adding --token to testorg preserved its ssh_key
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["list"])
         .output()
@@ -211,7 +203,6 @@ fn add_list_remove_roundtrip() {
         "token should be present after update: {testorg_line}"
     );
 
-    // Remove the first route
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["remove", "github.com", "testorg"])
         .output()
@@ -220,7 +211,6 @@ fn add_list_remove_roundtrip() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Removed"), "remove output: {stdout}");
 
-    // List should only show the second route
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["list"])
         .output()
@@ -235,7 +225,6 @@ fn add_list_remove_roundtrip() {
         "should remain: {stdout}"
     );
 
-    // Add with neither --ssh-key nor --token should fail
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["add", "github.com", "failorg"])
         .output()
@@ -245,7 +234,6 @@ fn add_list_remove_roundtrip() {
         "should reject add with no key or token"
     );
 
-    // Remove non-existent route
     let output = with_config_dir(&mut git_router(), tmp_path)
         .args(["remove", "github.com", "nonexistent"])
         .output()
