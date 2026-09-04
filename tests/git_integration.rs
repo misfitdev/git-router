@@ -18,22 +18,27 @@ fn path_with_bin() -> String {
     format!("{dir}:{}", std::env::var("PATH").unwrap_or_default())
 }
 
-fn git(home: &Path) -> Command {
-    let mut c = Command::new("git");
-    c.env("HOME", home)
+/// Isolates every path git-router or git might resolve. Overriding `HOME` alone
+/// is not enough: `dirs::config_dir()` prefers `XDG_CONFIG_HOME` on Linux, so a
+/// test would otherwise read and write the real user's config directory.
+fn isolate<'a>(cmd: &'a mut Command, home: &Path) -> &'a mut Command {
+    cmd.env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("GIT_CONFIG_GLOBAL", home.join("gitconfig"))
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("PATH", path_with_bin());
+        .env("PATH", path_with_bin())
+}
+
+fn git(home: &Path) -> Command {
+    let mut c = Command::new("git");
+    isolate(&mut c, home);
     c
 }
 
 fn router(home: &Path) -> Command {
     let mut c = Command::new(bin());
-    c.env("HOME", home)
-        .env("GIT_CONFIG_GLOBAL", home.join("gitconfig"))
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("PATH", path_with_bin());
+    isolate(&mut c, home);
     c
 }
 

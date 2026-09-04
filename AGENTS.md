@@ -33,8 +33,10 @@ remote forge.
 
 - **Never touch the operator's real git configuration.** `git router init` writes
   to the global gitconfig, and `add`/`remove` write to the OS config directory.
-  Every test and every manual probe sets `HOME`, `GIT_CONFIG_GLOBAL`, and
-  `GIT_CONFIG_SYSTEM=/dev/null` to a temporary directory first. A bare
+  Every test and every manual probe sets `HOME`, `XDG_CONFIG_HOME`,
+  `GIT_CONFIG_GLOBAL`, and `GIT_CONFIG_SYSTEM=/dev/null` to a temporary
+  directory first. `HOME` alone does not isolate anything on Linux, where
+  `dirs::config_dir()` prefers `XDG_CONFIG_HOME`. A bare
   `git router init` or `git config --global` from an agent is a defect.
 - **Never push a tag.** `.github/workflows/release.yml` fires on `v*` and creates
   a GitHub release, publishes to crates.io, and commits to the Homebrew tap.
@@ -92,7 +94,10 @@ against the same wrong expectation that produced it.
 - `tests/git_integration.rs` — drives real `git`. Credential behavior through
   `git credential fill`, identity through `git config user.email` in a throwaway
   repo, and `init`'s effect on user config through `git config --get-all`. Every
-  test isolates `HOME`, `GIT_CONFIG_GLOBAL`, and `GIT_CONFIG_SYSTEM`.
+  test isolates `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`, and
+  `GIT_CONFIG_SYSTEM`. Verify cross-platform test changes on Linux before
+  pushing: `docker run --rm -v "$PWD":/w -w /w rust:1.95-slim bash -c
+  'apt-get update -qq && apt-get install -y -qq git && CARGO_TARGET_DIR=/tmp/t cargo test'`.
 - `tests/cli_roundtrip.rs` — CLI surface: argument validation, add/list/remove,
   completions.
 - Unit tests in `src/` — pure logic: parsing, validation, path handling. A unit

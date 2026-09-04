@@ -4,8 +4,13 @@ fn git_router() -> Command {
     Command::new(env!("CARGO_BIN_EXE_git-router"))
 }
 
+/// `dirs::config_dir()` prefers `XDG_CONFIG_HOME` on Linux, so overriding `HOME`
+/// alone leaves the test writing to the real user's config directory.
 fn with_config_dir<'a>(cmd: &'a mut Command, dir: &std::path::Path) -> &'a mut Command {
     cmd.env("HOME", dir)
+        .env("XDG_CONFIG_HOME", dir.join(".config"))
+        .env("GIT_CONFIG_GLOBAL", dir.join(".gitconfig"))
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
 }
 
 #[test]
