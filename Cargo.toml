@@ -14,7 +14,7 @@ rust-version = "1.85"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1"
 dirs = "6"
 
 [dev-dependencies]

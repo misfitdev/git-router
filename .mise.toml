@@ -1,3 +1,5 @@
 [tools]
 rust = "1.95.0"
 lefthook = "2.1.6"
+osv-scanner = "2.5.1"
+"cargo:cargo-audit" = "0.22.2"
