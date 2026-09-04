@@ -19,7 +19,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Write core.sshCommand and credential.helper to global gitconfig
+    /// Wire git-router into the global gitconfig
     Init,
 
     /// Add or update a route
@@ -67,7 +67,7 @@ enum Commands {
         args: Vec<String>,
     },
 
-    /// Credential helper (called by git via credential.helper)
+    /// Credential helper (called by git via generated credential config)
     #[command(name = "credential-helper")]
     CredentialHelper {
         /// Operation: get, store, or erase

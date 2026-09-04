@@ -35,8 +35,16 @@ The following are in scope:
 
 ## Security Design
 
-- Tokens are stored as plaintext in `~/.config/git-router/config.toml`.
-  Users are responsible for filesystem permissions on this file.
+- Tokens are stored as plaintext in the git-router config file
+  (`~/.config/git-router/config.toml` on Linux,
+  `~/Library/Application Support/git-router/config.toml` on macOS).
+  The file is written `0600` inside a `0700` directory.
+- Tokens are only released over `https`. The generated credential config is
+  scoped to `https://` URLs, and the helper additionally refuses any request
+  whose `protocol` is not `https`.
+- `git router init` never removes or reorders credential helpers configured by
+  the user; per-route credential config is scoped so it applies only to routed
+  URLs.
 - Config writes use atomic rename to prevent partial-write corruption.
 - The SSH wrapper passes through to `ssh` via `exec`; it never interprets
   shell metacharacters in arguments.

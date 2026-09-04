@@ -53,7 +53,7 @@ pub fn validate_gitconfig_value(field: &str, value: &str) -> io::Result<()> {
 /// Rejects characters unsafe for gitconfig patterns, filenames, and glob expressions.
 /// Stricter than `validate_gitconfig_value` because host/org appear in includeIf
 /// patterns and fragment filenames.
-pub fn validate_route_key(field: &str, value: &str) -> io::Result<()> {
+fn validate_route_key(field: &str, value: &str) -> io::Result<()> {
     if value.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -69,6 +69,66 @@ pub fn validate_route_key(field: &str, value: &str) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// A host is a single path segment: it becomes part of a fragment filename
+/// verbatim, so `/` would let it escape the config directory.
+pub fn validate_host(field: &str, value: &str) -> io::Result<()> {
+    validate_route_key(field, value)?;
+    if value.contains('/') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{field} must not contain '/'"),
+        ));
+    }
+    Ok(())
+}
+
+/// An org may contain `/` for nested namespaces; `..` is rejected so the
+/// slug cannot walk out of the config directory.
+pub fn validate_org(field: &str, value: &str) -> io::Result<()> {
+    validate_route_key(field, value)?;
+    if value.split('/').any(|seg| seg == ".." || seg.is_empty()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{field} must not contain empty or '..' path segments"),
+        ));
+    }
+    Ok(())
+}
+
+/// Escapes a literal string for use as a git config `value_regex` (POSIX ERE).
+fn regex_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for c in s.chars() {
+        if "\\^$.[]|()*+?{}".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Anchored `value_regex` matching exactly one literal config value.
+pub fn exact_value_regex(value: &str) -> String {
+    format!("^{}$", regex_escape(value))
+}
+
+/// Strips a trailing `:port` from a credential `host` field so a route for
+/// `github.com` still matches a remote served on a non-default port.
+/// IPv6 literals arrive bracketed (`[::1]:8080`), so only a colon after the
+/// closing bracket is a port separator.
+pub fn strip_port(host: &str) -> &str {
+    if host.starts_with('[') {
+        return match host.find(']') {
+            Some(end) => &host[..=end],
+            None => host,
+        };
+    }
+    match host.rsplit_once(':') {
+        Some((h, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => h,
+        _ => host,
+    }
 }
 
 #[cfg(unix)]
@@ -129,7 +189,8 @@ pub fn save_config(config: &Config) -> io::Result<()> {
     })?;
     create_dir_private(parent)?;
     let contents = toml::to_string_pretty(config).map_err(io::Error::other)?;
-    // Write to a temp file in the same directory, then rename for atomic replacement.
+    // rename(2) is atomic only within a filesystem, so the temp file has to share
+    // the destination's directory.
     let tmp_path = path.with_extension("toml.tmp");
     write_private(&tmp_path, &contents)?;
     fs::rename(&tmp_path, &path)?;
@@ -141,72 +202,129 @@ pub fn save_config(config: &Config) -> io::Result<()> {
     Ok(())
 }
 
-/// Generates identity gitconfig files for routes that have user_name or user_email set.
-/// Creates per-route fragment files and a top-level identities.gitconfig with includeIf rules.
-pub fn write_identity_configs(config: &Config) -> io::Result<()> {
-    let dir = config_path()
-        .parent()
-        .expect("config path has parent")
-        .to_path_buf();
-    create_dir_private(&dir)?;
+pub const GENERATED_GITCONFIG_NAME: &str = "git-router.gitconfig";
 
-    let mut includes = String::new();
-    for route in &config.routes {
-        if route.user_name.is_none() && route.user_email.is_none() {
-            continue;
-        }
+/// Pre-0.2 name for the generated include. Still removed on regeneration so an
+/// upgraded install does not leave a stale include behind.
+pub const LEGACY_GITCONFIG_NAME: &str = "identities.gitconfig";
 
-        // Defense-in-depth: catch hand-edited configs with unsafe values.
-        validate_route_key("host", &route.host)?;
-        validate_route_key("org", &route.org)?;
-        if let Some(name) = &route.user_name {
-            validate_gitconfig_value("user_name", name)?;
-        }
-        if let Some(email) = &route.user_email {
-            validate_gitconfig_value("user_email", email)?;
-        }
-
-        let slug = format!("{}-{}", route.host, route.org.replace('/', "-"));
-        let fragment_name = format!("identity-{slug}.gitconfig");
-        let fragment_path = dir.join(&fragment_name);
-
-        // Write the identity fragment
-        let mut content = String::from("[user]\n");
-        if let Some(name) = &route.user_name {
-            content.push_str(&format!("    name = {name}\n"));
-        }
-        if let Some(email) = &route.user_email {
-            content.push_str(&format!("    email = {email}\n"));
-        }
-        write_private(&fragment_path, &content)?;
-
-        // SSH URL pattern: git@host:org/**
-        includes.push_str(&format!(
-            "[includeIf \"hasconfig:remote.*.url:git@{}:{}/**\"]\n    path = {}\n",
-            route.host,
-            route.org,
-            fragment_path.display()
-        ));
-        // HTTPS URL pattern: https://host/org/**
-        includes.push_str(&format!(
-            "[includeIf \"hasconfig:remote.*.url:https://{}/{}/**\"]\n    path = {}\n",
-            route.host,
-            route.org,
-            fragment_path.display()
-        ));
-    }
-
-    let identities_path = dir.join("identities.gitconfig");
-    write_private(&identities_path, &includes)?;
-    Ok(())
+/// Remote URL shapes git may record for `host`/`org`. Each becomes an includeIf
+/// pattern; git glob-matches these against the whole remote URL.
+fn remote_url_patterns(host: &str, org: &str) -> Vec<String> {
+    vec![
+        format!("*@{host}:{org}/**"),
+        format!("{host}:{org}/**"),
+        format!("ssh://*@{host}/{org}/**"),
+        format!("ssh://*@{host}:*/{org}/**"),
+        format!("ssh://{host}/{org}/**"),
+        format!("https://{host}/{org}/**"),
+        format!("https://*@{host}/{org}/**"),
+        format!("https://{host}:*/{org}/**"),
+    ]
 }
 
-pub fn identities_gitconfig_path() -> PathBuf {
+pub fn identity_fragment_name(host: &str, org: &str) -> String {
+    format!("identity-{}-{}.gitconfig", host, org.replace('/', "-"))
+}
+
+/// Generates the single gitconfig file that `include.path` points at, plus one
+/// identity fragment per route that sets a committer identity.
+///
+/// The credential block is emitted only for routes that carry a token: `helper = ""`
+/// clears inherited helpers for matching URLs, so emitting it for a tokenless route
+/// would suppress the user's own credential store with nothing to replace it.
+pub fn write_generated_gitconfig_in(dir: &Path, config: &Config) -> io::Result<()> {
+    create_dir_private(dir)?;
+
+    let mut out = String::from(
+        "# Generated by git-router. Do not edit -- rewritten by `git router add|remove|init`.\n",
+    );
+    let mut expected_fragments = std::collections::HashSet::new();
+
+    for route in &config.routes {
+        // Defense-in-depth: catch hand-edited configs with unsafe values.
+        let ctx = |e: io::Error| {
+            io::Error::new(e.kind(), format!("route {}/{}: {e}", route.host, route.org))
+        };
+        validate_host("host", &route.host).map_err(ctx)?;
+        validate_org("org", &route.org).map_err(ctx)?;
+
+        if route.user_name.is_some() || route.user_email.is_some() {
+            if let Some(name) = &route.user_name {
+                validate_gitconfig_value("user_name", name).map_err(ctx)?;
+            }
+            if let Some(email) = &route.user_email {
+                validate_gitconfig_value("user_email", email).map_err(ctx)?;
+            }
+
+            let fragment_name = identity_fragment_name(&route.host, &route.org);
+            let fragment_path = dir.join(&fragment_name);
+            expected_fragments.insert(fragment_name);
+
+            let mut content = String::from("[user]\n");
+            if let Some(name) = &route.user_name {
+                content.push_str(&format!("    name = {name}\n"));
+            }
+            if let Some(email) = &route.user_email {
+                content.push_str(&format!("    email = {email}\n"));
+            }
+            write_private(&fragment_path, &content)?;
+
+            out.push('\n');
+            for pattern in remote_url_patterns(&route.host, &route.org) {
+                out.push_str(&format!(
+                    "[includeIf \"hasconfig:remote.*.url:{}\"]\n    path = {}\n",
+                    pattern,
+                    fragment_path.display()
+                ));
+            }
+        }
+
+        if route.token.is_some() {
+            out.push_str(&format!(
+                "\n[credential \"https://{}/{}\"]\n    \
+                 useHttpPath = true\n    \
+                 helper = \"\"\n    \
+                 helper = \"!git-router credential-helper\"\n",
+                route.host, route.org
+            ));
+        }
+    }
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if name.starts_with("identity-")
+                && name.ends_with(".gitconfig")
+                && !expected_fragments.contains(name)
+            {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+    let _ = fs::remove_file(dir.join(LEGACY_GITCONFIG_NAME));
+
+    write_private(&dir.join(GENERATED_GITCONFIG_NAME), &out)
+}
+
+pub fn write_generated_gitconfig(config: &Config) -> io::Result<()> {
+    write_generated_gitconfig_in(&config_dir(), config)
+}
+
+pub fn config_dir() -> PathBuf {
     config_path()
         .parent()
         .expect("config path has parent")
         .to_path_buf()
-        .join("identities.gitconfig")
+}
+
+pub fn generated_gitconfig_path() -> PathBuf {
+    config_dir().join(GENERATED_GITCONFIG_NAME)
+}
+
+pub fn legacy_gitconfig_path() -> PathBuf {
+    config_dir().join(LEGACY_GITCONFIG_NAME)
 }
 
 pub fn expand_tilde(path: &str) -> PathBuf {
@@ -238,8 +356,8 @@ pub fn resolve_key_path(raw: &str) -> PathBuf {
     expanded
 }
 
-/// Matches progressively shorter path prefixes so `planera.io/corp-it/repo.git`
-/// tries `planera.io/corp-it` before `planera.io`.
+/// Matches progressively shorter path prefixes so `acme.dev/platform/repo.git`
+/// tries `acme.dev/platform` before `acme.dev`.
 pub fn find_route<'a>(config: &'a Config, host: &str, org_path: &str) -> Option<&'a Route> {
     let segments: Vec<&str> = org_path.split('/').collect();
     for end in (1..=segments.len()).rev() {
@@ -272,24 +390,24 @@ mod tests {
                 },
                 Route {
                     host: "github.com".into(),
-                    org: "planeraio".into(),
-                    ssh_key: Some("~/.ssh/planera-gh.pub".into()),
+                    org: "acmecorp".into(),
+                    ssh_key: Some("~/.ssh/acme-gh.pub".into()),
                     token: None,
                     user_name: Some("Tucker DeWitt".into()),
-                    user_email: Some("tucker@planera.io".into()),
+                    user_email: Some("dev@acme.dev".into()),
                 },
                 Route {
                     host: "gitlab.com".into(),
-                    org: "planera.io".into(),
-                    ssh_key: Some("~/.ssh/planera-gl.pub".into()),
+                    org: "acme.dev".into(),
+                    ssh_key: Some("~/.ssh/acme-gl.pub".into()),
                     token: None,
                     user_name: None,
                     user_email: None,
                 },
                 Route {
                     host: "gitlab.com".into(),
-                    org: "planera.io/corp-it".into(),
-                    ssh_key: Some("~/.ssh/planera-gl-corp.pub".into()),
+                    org: "acme.dev/platform".into(),
+                    ssh_key: Some("~/.ssh/acme-gl-platform.pub".into()),
                     token: None,
                     user_name: None,
                     user_email: None,
@@ -316,15 +434,15 @@ mod tests {
     #[test]
     fn nested_gitlab_path_exact() {
         let cfg = test_config();
-        let route = find_route(&cfg, "gitlab.com", "planera.io/corp-it/auto-it.git").unwrap();
-        assert_eq!(route.org, "planera.io/corp-it");
+        let route = find_route(&cfg, "gitlab.com", "acme.dev/platform/service.git").unwrap();
+        assert_eq!(route.org, "acme.dev/platform");
     }
 
     #[test]
     fn nested_gitlab_path_fallback() {
         let cfg = test_config();
-        let route = find_route(&cfg, "gitlab.com", "planera.io/other-group/repo.git").unwrap();
-        assert_eq!(route.org, "planera.io");
+        let route = find_route(&cfg, "gitlab.com", "acme.dev/other-group/repo.git").unwrap();
+        assert_eq!(route.org, "acme.dev");
     }
 
     #[test]
@@ -393,8 +511,8 @@ mod tests {
     #[test]
     fn find_route_single_org_multi_segment_path() {
         let cfg = test_config();
-        let route = find_route(&cfg, "github.com", "planeraio/some-repo.git").unwrap();
-        assert_eq!(route.org, "planeraio");
+        let route = find_route(&cfg, "github.com", "acmecorp/some-repo.git").unwrap();
+        assert_eq!(route.org, "acmecorp");
     }
 
     #[test]
@@ -523,7 +641,7 @@ mod tests {
     fn validate_route_key_accepts_normal() {
         assert!(validate_route_key("host", "github.com").is_ok());
         assert!(validate_route_key("org", "my-org").is_ok());
-        assert!(validate_route_key("org", "planera.io/corp-it").is_ok());
+        assert!(validate_route_key("org", "acme.dev/platform").is_ok());
     }
 
     #[cfg(unix)]
@@ -583,75 +701,137 @@ user_email = "tucker@personal.dev"
         assert!(serialized.contains("user_email = \"tucker@personal.dev\""));
     }
 
-    #[test]
-    fn write_identity_configs_generates_files() {
-        let dir = tempfile::tempdir().unwrap();
-        // Override config_path by writing directly to the temp dir
-        let cfg = Config {
-            routes: vec![
-                Route {
-                    host: "github.com".into(),
-                    org: "personal".into(),
-                    ssh_key: None,
-                    token: None,
-                    user_name: Some("Tucker".into()),
-                    user_email: Some("tucker@personal.dev".into()),
-                },
-                Route {
-                    host: "github.com".into(),
-                    org: "work".into(),
-                    ssh_key: None,
-                    token: None,
-                    user_name: None,
-                    user_email: None,
-                },
-            ],
-        };
+    fn cfg(routes: Vec<Route>) -> Config {
+        Config { routes }
+    }
 
-        // Write identity configs to temp dir directly (testing the content generation)
-        let identities_path = dir.path().join("identities.gitconfig");
-        let fragment_path = dir.path().join("identity-github.com-personal.gitconfig");
-
-        let mut includes = String::new();
-        for route in &cfg.routes {
-            if route.user_name.is_none() && route.user_email.is_none() {
-                continue;
-            }
-            let slug = format!("{}-{}", route.host, route.org.replace('/', "-"));
-            let frag = dir.path().join(format!("identity-{slug}.gitconfig"));
-            let mut content = String::from("[user]\n");
-            if let Some(name) = &route.user_name {
-                content.push_str(&format!("    name = {name}\n"));
-            }
-            if let Some(email) = &route.user_email {
-                content.push_str(&format!("    email = {email}\n"));
-            }
-            std::fs::write(&frag, &content).unwrap();
-            includes.push_str(&format!(
-                "[includeIf \"hasconfig:remote.*.url:git@{}:{}/**\"]\n    path = {}\n",
-                route.host,
-                route.org,
-                frag.display()
-            ));
-            includes.push_str(&format!(
-                "[includeIf \"hasconfig:remote.*.url:https://{}/{}/**\"]\n    path = {}\n",
-                route.host,
-                route.org,
-                frag.display()
-            ));
+    fn route(host: &str, org: &str) -> Route {
+        Route {
+            host: host.into(),
+            org: org.into(),
+            ssh_key: None,
+            token: None,
+            user_name: None,
+            user_email: None,
         }
-        std::fs::write(&identities_path, &includes).unwrap();
+    }
 
-        // Verify the fragment was created with correct content
-        let content = std::fs::read_to_string(&fragment_path).unwrap();
-        assert!(content.contains("name = Tucker"));
-        assert!(content.contains("email = tucker@personal.dev"));
+    #[test]
+    fn generated_config_writes_identity_fragment_and_includes() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = cfg(vec![
+            Route {
+                user_name: Some("Tucker".into()),
+                user_email: Some("tucker@personal.dev".into()),
+                ..route("github.com", "personal")
+            },
+            route("github.com", "work"),
+        ]);
 
-        // Verify identities.gitconfig has includeIf for both SSH and HTTPS
-        let includes_content = std::fs::read_to_string(&identities_path).unwrap();
-        assert!(includes_content.contains("hasconfig:remote.*.url:git@github.com:personal/**"));
-        assert!(includes_content.contains("hasconfig:remote.*.url:https://github.com/personal/**"));
-        // Route without identity should not be included
-        assert!(!includes_content.contains("work"));
+        write_generated_gitconfig_in(dir.path(), &config).unwrap();
+
+        let fragment =
+            std::fs::read_to_string(dir.path().join("identity-github.com-personal.gitconfig"))
+                .unwrap();
+        assert!(fragment.contains("name = Tucker"));
+        assert!(fragment.contains("email = tucker@personal.dev"));
+
+        let generated = std::fs::read_to_string(dir.path().join(GENERATED_GITCONFIG_NAME)).unwrap();
+        assert!(generated.contains("hasconfig:remote.*.url:*@github.com:personal/**"));
+        assert!(generated.contains("hasconfig:remote.*.url:https://github.com/personal/**"));
+        // A route with neither identity nor token contributes nothing.
+        assert!(!generated.contains("work"));
+    }
+
+    #[test]
+    fn generated_config_emits_credential_section_only_for_token_routes() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = cfg(vec![
+            Route {
+                token: Some("ghp_x".into()),
+                ..route("github.com", "with-token")
+            },
+            Route {
+                ssh_key: Some("~/.ssh/id.pub".into()),
+                ..route("github.com", "no-token")
+            },
+        ]);
+
+        write_generated_gitconfig_in(dir.path(), &config).unwrap();
+        let generated = std::fs::read_to_string(dir.path().join(GENERATED_GITCONFIG_NAME)).unwrap();
+
+        assert!(generated.contains("[credential \"https://github.com/with-token\"]"));
+        assert!(generated.contains("useHttpPath = true"));
+        // The empty helper resets inherited helpers; emitting it for a tokenless
+        // route would disable the user's own credential store for those URLs.
+        assert!(generated.contains("helper = \"\""));
+        assert!(!generated.contains("[credential \"https://github.com/no-token\"]"));
+    }
+
+    #[test]
+    fn generated_config_prunes_fragments_for_removed_routes() {
+        let dir = tempfile::tempdir().unwrap();
+        let with_route = cfg(vec![Route {
+            user_email: Some("a@b.c".into()),
+            ..route("github.com", "personal")
+        }]);
+        write_generated_gitconfig_in(dir.path(), &with_route).unwrap();
+        let fragment = dir.path().join("identity-github.com-personal.gitconfig");
+        assert!(fragment.exists());
+
+        write_generated_gitconfig_in(dir.path(), &cfg(vec![])).unwrap();
+        assert!(
+            !fragment.exists(),
+            "stale identity fragment left behind after route removal"
+        );
+    }
+
+    #[test]
+    fn generated_config_removes_legacy_include_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(LEGACY_GITCONFIG_NAME);
+        std::fs::create_dir_all(dir.path()).unwrap();
+        std::fs::write(&legacy, "stale").unwrap();
+
+        write_generated_gitconfig_in(dir.path(), &cfg(vec![])).unwrap();
+        assert!(!legacy.exists());
+    }
+
+    #[test]
+    fn generated_config_rejects_hand_edited_unsafe_route() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = cfg(vec![Route {
+            user_email: Some("a@b.c".into()),
+            ..route("github.com/../evil", "org")
+        }]);
+        let err = write_generated_gitconfig_in(dir.path(), &config).unwrap_err();
+        assert!(err.to_string().contains("github.com/../evil"), "{err}");
+    }
+
+    #[test]
+    fn validate_host_rejects_path_separator() {
+        assert!(validate_host("host", "a/../../b").is_err());
+        assert!(validate_host("host", "github.com").is_ok());
+    }
+
+    #[test]
+    fn validate_org_allows_nesting_but_rejects_traversal() {
+        assert!(validate_org("org", "acme/foo").is_ok());
+        assert!(validate_org("org", "acme/../foo").is_err());
+        assert!(validate_org("org", "acme//foo").is_err());
+    }
+
+    #[test]
+    fn strip_port_handles_ipv4_ipv6_and_bare_hosts() {
+        assert_eq!(strip_port("github.com"), "github.com");
+        assert_eq!(strip_port("github.com:8443"), "github.com");
+        assert_eq!(strip_port("[::1]:8080"), "[::1]");
+        assert_eq!(strip_port("[::1]"), "[::1]");
+    }
+
+    #[test]
+    fn exact_value_regex_escapes_metacharacters() {
+        let re = exact_value_regex("/a b/git-router.gitconfig");
+        assert_eq!(re, "^/a b/git-router\\.gitconfig$");
     }
 }

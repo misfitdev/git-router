@@ -1,4 +1,4 @@
-use crate::config::{find_route, load_config};
+use crate::config::{find_route, load_config, strip_port};
 use std::collections::HashMap;
 use std::io::{self, BufRead};
 
@@ -32,11 +32,21 @@ pub fn handle_get() {
 
     let fields = parse_stdin(&input);
 
+    // Tokens are bearer credentials: never emit one over cleartext. The generated
+    // `[credential "https://..."]` section should keep us from being invoked for
+    // http:// at all; this is the backstop if a user wires the helper up by hand.
+    if fields.get("protocol").map(String::as_str) != Some("https") {
+        return;
+    }
+
     let host = match fields.get("host") {
-        Some(h) => h.as_str(),
+        Some(h) => strip_port(h),
         None => return,
     };
 
+    // git only sends `path` when credential.useHttpPath is on, which the generated
+    // config enables per-route. Without it we cannot tell orgs apart, and guessing
+    // would hand one org's token to another.
     let path = match fields.get("path") {
         Some(p) => p.as_str(),
         None => return,
@@ -69,11 +79,11 @@ mod tests {
 
     #[test]
     fn parse_stdin_basic() {
-        let input = "protocol=https\nhost=github.com\npath=planeraio/repo.git\n\n";
+        let input = "protocol=https\nhost=github.com\npath=acmecorp/repo.git\n\n";
         let fields = parse_stdin(input);
         assert_eq!(fields.get("protocol").unwrap(), "https");
         assert_eq!(fields.get("host").unwrap(), "github.com");
-        assert_eq!(fields.get("path").unwrap(), "planeraio/repo.git");
+        assert_eq!(fields.get("path").unwrap(), "acmecorp/repo.git");
     }
 
     #[test]
@@ -128,7 +138,7 @@ mod tests {
             routes: vec![
                 Route {
                     host: "gitlab.com".into(),
-                    org: "planera.io".into(),
+                    org: "acme.dev".into(),
                     ssh_key: None,
                     token: Some("tok-org".into()),
                     user_name: None,
@@ -136,19 +146,17 @@ mod tests {
                 },
                 Route {
                     host: "gitlab.com".into(),
-                    org: "planera.io/corp-it".into(),
+                    org: "acme.dev/platform".into(),
                     ssh_key: None,
-                    token: Some("tok-corp-it".into()),
+                    token: Some("tok-platform".into()),
                     user_name: None,
                     user_email: None,
                 },
             ],
         };
-        // Nested path should match the more specific route.
-        let route = crate::config::find_route(&cfg, "gitlab.com", "planera.io/corp-it/repo.git");
-        assert_eq!(route.and_then(|r| r.token.as_deref()), Some("tok-corp-it"));
-        // Shallow path should fall back to org-level route.
-        let route = crate::config::find_route(&cfg, "gitlab.com", "planera.io/other/repo.git");
+        let route = crate::config::find_route(&cfg, "gitlab.com", "acme.dev/platform/repo.git");
+        assert_eq!(route.and_then(|r| r.token.as_deref()), Some("tok-platform"));
+        let route = crate::config::find_route(&cfg, "gitlab.com", "acme.dev/other/repo.git");
         assert_eq!(route.and_then(|r| r.token.as_deref()), Some("tok-org"));
     }
 }
